@@ -1,440 +1,254 @@
-/*
- * MANUAL SPENDING TRACKER
- * Scriptable for iOS
- * No bank connection required
- */
+/* Manual Spending Tracker for Scriptable. Data is stored in iCloud Drive. */
+const CATEGORIES = ["Food & Drinks", "Shopping", "Transportation", "Entertainment", "Bills", "Subscriptions", "Health", "Other"];
+const COLORS = ["#60A5FA", "#A78BFA", "#34D399", "#FBBF24", "#FB7185", "#22D3EE", "#F472B6", "#94A3B8"];
+const DATA_NAME = "spending-tracker.json";
+const localFM = FileManager.local();
+const legacyPath = localFM.joinPath(localFM.documentsDirectory(), DATA_NAME);
 
-const fm = FileManager.local();
-const file = fm.joinPath(
-  fm.documentsDirectory(),
-  "spending-tracker.json"
-);
-
-const CATEGORIES = [
-  "Food & Drinks",
-  "Shopping",
-  "Transportation",
-  "Entertainment",
-  "Bills",
-  "Subscriptions",
-  "Health",
-  "Other"
-];
-
-const COLORS = [
-  "#60A5FA",
-  "#A78BFA",
-  "#34D399",
-  "#FBBF24",
-  "#FB7185",
-  "#22D3EE",
-  "#F472B6",
-  "#94A3B8"
-];
-
-const money = n => "$" + Number(n).toFixed(2);
-
-// --------------------
-// DATA STORAGE
-// --------------------
-
-function load() {
-  if (!fm.fileExists(file)) return [];
-  return JSON.parse(fm.readString(file));
+function paths() {
+  const fm = FileManager.iCloud(), dir = fm.documentsDirectory();
+  return { fm, data: fm.joinPath(dir, DATA_NAME), backup: fm.joinPath(dir, "spending-tracker-backup.json"),
+    temp: fm.joinPath(dir, "spending-tracker-writing.json"), settings: fm.joinPath(dir, "spending-tracker-settings.json") };
 }
-
-function save(data) {
-  fm.writeString(
-    file,
-    JSON.stringify(data, null, 2)
-  );
-}
-
-// --------------------
-// DATE HELPERS
-// --------------------
-
-function monthKey(date) {
-  const d = new Date(date);
-  return d.getFullYear() + "-" +
-    String(d.getMonth() + 1).padStart(2, "0");
-}
-
-function dayKey(date) {
-  const d = new Date(date);
-  return monthKey(d) + "-" +
-    String(d.getDate()).padStart(2, "0");
-}
-
-// --------------------
-// ADD AN EXPENSE
-// --------------------
-
-async function addExpense() {
-  const a = new Alert();
-  a.title = "New Expense";
-  a.message = "Enter your purchase details";
-
-  a.addTextField("Amount (e.g. 14.50)");
-  a.addTextField("Description (e.g. Lunch)");
-
-  a.addAction("Next");
-  a.addCancelAction("Cancel");
-
-  if (await a.presentAlert() === -1) return;
-
-  const amount = Number(
-    a.textFieldValue(0)
-      .trim()
-      .replace(/[$,]/g, "")
-  );
-
-  const note = a.textFieldValue(1).trim();
-
-  if (
-    !Number.isFinite(amount) ||
-    amount <= 0
-  ) {
-    const error = new Alert();
-    error.title = "Invalid Amount";
-    error.message =
-      "Please enter an amount greater than zero.";
-    error.addAction("OK");
-    await error.presentAlert();
-    return;
+function checkData(raw) {
+  const data = JSON.parse(raw);
+  if (!Array.isArray(data) || data.some(e => !e || !Number.isFinite(e.amount) || e.amount <= 0 ||
+    typeof e.date !== "string" || !Number.isFinite(Date.parse(e.date)) ||
+    typeof e.note !== "string" || typeof e.category !== "string")) {
+    throw new Error("The spending JSON is invalid. No changes were made.");
   }
-
-  const choice = new Alert();
-  choice.title = "Choose Category";
-
-  CATEGORIES.forEach(c => choice.addAction(c));
-  choice.addCancelAction("Cancel");
-
-  const index = await choice.presentSheet();
-  if (index === -1) return;
-
-  const data = load();
-
-  data.push({
-    id: Date.now() + "-" + Math.random(),
-    amount: Math.round(amount * 100) / 100,
-    note: note || CATEGORIES[index],
-    category: CATEGORIES[index],
-    date: new Date().toISOString()
-  });
-
-  save(data);
-
-  const done = new Alert();
-  done.title = "Expense Saved";
-  done.message =
-    `${money(amount)} added to ${CATEGORIES[index]}`;
-  done.addAction("Done");
-
-  await done.presentAlert();
+  return data;
 }
-
-// --------------------
-// VIEW EXPENSES
-// --------------------
-
-async function viewExpenses() {
-  const data = load()
-    .slice()
-    .sort((a, b) =>
-      new Date(b.date) - new Date(a.date)
-    );
-
-  const a = new Alert();
-  a.title = "Recent Expenses";
-
-  a.message = data.length
-    ? data.slice(0, 12).map(e =>
-        `${money(e.amount)} - ${e.note}\n` +
-        `${e.category} | ` +
-        new Date(e.date).toLocaleDateString()
-      ).join("\n\n")
-    : "No expenses logged yet.";
-
-  a.addAction("OK");
-  await a.presentAlert();
-}
-
-// --------------------
-// DELETE LAST EXPENSE
-// --------------------
-
-async function deleteLast() {
-  const data = load();
-
-  if (!data.length) {
-    const empty = new Alert();
-    empty.title = "No Expenses";
-    empty.message = "Nothing to delete.";
-    empty.addAction("OK");
-    await empty.presentAlert();
-    return;
+async function readFile(fm, path) { await fm.downloadFileFromiCloud(path); return fm.readString(path); }
+async function loadState() {
+  const p = paths(); let expenses = [];
+  if (p.fm.fileExists(p.data)) expenses = checkData(await readFile(p.fm, p.data));
+  else if (localFM.fileExists(legacyPath)) {
+    expenses = checkData(localFM.readString(legacyPath));
+    p.fm.writeString(p.data, JSON.stringify(expenses, null, 2)); // Keep the local original.
   }
+  let budget = 0;
+  if (p.fm.fileExists(p.settings)) {
+    const settings = JSON.parse(await readFile(p.fm, p.settings));
+    if (Number.isFinite(settings.monthlyBudget) && settings.monthlyBudget >= 0) budget = settings.monthlyBudget;
+  }
+  return { expenses, budget };
+}
+async function saveExpenses(data) {
+  const p = paths();
+  if (p.fm.fileExists(p.data)) {
+    const previous = await readFile(p.fm, p.data);
+    checkData(previous);
+    p.fm.writeString(p.backup, previous);
+  }
+  p.fm.writeString(p.temp, JSON.stringify(data, null, 2));
+  p.fm.move(p.temp, p.data);
+}
+function saveBudget(budget) { const p = paths(); p.fm.writeString(p.settings, JSON.stringify({ monthlyBudget: budget }, null, 2)); }
+function amountFrom(value, zeroOK = false) {
+  const raw = String(value).trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw new Error("Enter dollars with up to two decimal places.");
+  const cents = Math.round(Number(raw) * 100);
+  if (!Number.isSafeInteger(cents) || (!zeroOK && cents <= 0)) throw new Error("Enter an amount greater than zero.");
+  return cents / 100;
+}
+function dayOf(value) {
+  const d = new Date(value);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function dateFor(day, previous) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("Choose a valid date.");
+  const d = new Date(day + "T12:00:00");
+  if (!Number.isFinite(d.getTime()) || dayOf(d) !== day) throw new Error("Choose a valid date.");
+  if (previous && dayOf(previous) === day) return previous;
+  return (!previous && day === dayOf(new Date()) ? new Date() : d).toISOString();
+}
+const monthOf = value => dayOf(value).slice(0, 7);
+const money = value => "$" + Number(value).toFixed(2);
+const safeJSON = value => JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+function exportCSV(data) {
+  const q = value => '"' + String(value).replace(/"/g, '""') + '"';
+  return ["Date,Amount,Description,Category", ...data.slice().sort((a, b) => a.date.localeCompare(b.date))
+    .map(e => [dayOf(e.date), Number(e.amount).toFixed(2), e.note, e.category].map(q).join(","))].join("\r\n");
+}
 
-  const last = data[data.length - 1];
+function makeHTML(state, startAdding) {
+  const boot = safeJSON({ ...state, categories: CATEGORIES, colors: COLORS, startAdding });
+  return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><title>Spending Tracker</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#f8fafc;background:#0b1220}*{box-sizing:border-box}body{margin:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}button,input,select{font:inherit}button{cursor:pointer}
+main{max-width:650px;margin:auto;padding:22px 18px 45px}h1{font-size:30px;letter-spacing:-.04em;margin:6px 0 4px}h2{font-size:17px;margin:0 0 14px}.eyebrow{font-size:11px;letter-spacing:.15em;font-weight:800;color:#91a2bd}.muted{color:#9caec9}.top,.section-head,.expense,.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.top{align-items:flex-start}.section-head{margin:24px 2px 12px}.section-head h2{margin:0}
+.primary,.secondary,.danger,.nav button{border-radius:12px;padding:11px 15px;font-weight:750}.primary{background:#60a5fa;border:0;color:#061324}.secondary,.nav button{background:#172338;border:1px solid #31405a;color:#dce8fa}.danger{background:#422431;border:1px solid #b25169;color:#ffdce4}.nav{display:flex;gap:7px;margin:23px 0 19px}.nav button{flex:1;padding:10px 6px;font-size:13px}.nav button.active{background:#27466d;border-color:#60a5fa;color:white}
+.card{background:#151f31;border:1px solid #2a3952;border-radius:20px;padding:19px;margin-bottom:14px}.hero{background:linear-gradient(145deg,#1b2d49,#142034)}.amount{font-size:42px;font-weight:800;letter-spacing:-.05em;margin:6px 0}.stats{display:flex;gap:14px;margin-top:18px}.stat{flex:1}.stat strong{display:block;font-size:17px;margin-top:4px}.progress{height:9px;background:#30415b;border-radius:9px;overflow:hidden;margin:16px 0 8px}.progress span{display:block;height:100%;background:#60a5fa}.progress span.over{background:#fb7185}
+.cat{display:grid;grid-template-columns:1fr auto;gap:5px 14px;margin:15px 0}.bar{grid-column:1/-1;height:5px;background:#26344c;border-radius:5px;overflow:hidden}.bar span{display:block;height:100%}.list{display:grid;gap:9px}.expense{width:100%;text-align:left;background:#172338;border:1px solid #2c3c56;border-radius:14px;padding:13px;color:white}.expense .note{font-weight:700}.expense small{display:block;color:#96a9c6;margin-top:4px}.expense b{white-space:nowrap}.empty{padding:18px 0;color:#9caec9}
+label{display:block;color:#a8b9d0;font-size:13px;font-weight:700;margin:15px 0 7px}input,select{width:100%;border:1px solid #3b4c65;border-radius:12px;background:#101a2b;color:white;padding:13px;outline:none}input:focus,select:focus{border-color:#60a5fa}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.actions{display:flex;gap:9px;margin-top:18px}.actions button{flex:1}.hint{font-size:12px;line-height:1.5;color:#90a4bf}
+.overlay{position:fixed;inset:0;background:#040912c9;z-index:10;display:none;align-items:flex-end}.overlay.open{display:flex}.sheet{background:#172338;border:1px solid #3a4e69;border-radius:24px 24px 0 0;padding:24px 20px calc(25px + env(safe-area-inset-bottom));width:100%;max-width:650px;margin:auto;max-height:90vh;overflow:auto}.sheet-head button{background:none;border:0;color:#b6c6dc;font-size:28px}.error{color:#fda4af;min-height:19px;font-size:13px;margin-top:10px}.toast{position:fixed;bottom:25px;left:18px;right:18px;max-width:600px;margin:auto;background:#25446b;border:1px solid #5687bf;border-radius:13px;padding:13px 16px;z-index:20;display:none}
+</style></head><body><main>
+<div class="top"><div><div class="eyebrow">NOVA · MONEY</div><h1>Spending Tracker</h1><div class="muted">Know where your money went.</div></div><button class="primary" id="addTop">+ Add</button></div>
+<nav class="nav"><button class="active" data-tab="overview">Overview</button><button data-tab="history">History</button><button data-tab="settings">Settings</button></nav>
+<section id="overview"><div class="card hero"><div class="eyebrow" id="heroMonth"></div><div class="amount" id="heroAmount"></div><div class="muted" id="budgetLine"></div><div class="progress" id="progress" hidden><span></span></div><div class="stats"><div class="stat"><div class="muted">Today</div><strong id="todayAmount"></strong></div><div class="stat"><div class="muted">Transactions</div><strong id="count"></strong></div></div></div><div class="section-head"><h2>Top categories</h2></div><div class="card" id="categories"></div><div class="section-head"><h2>Recent expenses</h2><button class="secondary" id="seeAll">See all</button></div><div class="list" id="recent"></div></section>
+<section id="history" hidden><div class="section-head"><h2>Expense history</h2><button class="primary" id="addHistory">+ Add</button></div><label for="monthFilter">Month</label><select id="monthFilter"></select><div class="section-head"><div class="muted" id="historySummary"></div></div><div class="card" id="historyCategories"></div><div class="list" id="historyList"></div></section>
+<section id="settings" hidden><div class="card"><h2>Monthly spending target</h2><div class="muted">Set a guide for your total spending each month.</div><label for="budgetInput">Target in dollars</label><input id="budgetInput" inputmode="decimal" placeholder="e.g. 1200.00"><div class="actions"><button class="primary" id="saveBudget">Save target</button></div><p class="hint">Enter 0 to turn off the target.</p></div><div class="card"><h2>Your data</h2><p class="muted">The live JSON is in iCloud Drive → Scriptable. The previous version is kept there after each change.</p><div class="actions"><button class="secondary" id="exportCSV">Export CSV</button><button class="secondary" id="exportJSON">Export JSON</button></div><p class="hint">An occasional export gives you a separate backup.</p></div></section>
+</main><div class="overlay" id="overlay"><div class="sheet"><div class="sheet-head"><h2 id="formTitle">New expense</h2><button id="closeForm" aria-label="Close">×</button></div><form id="expenseForm"><div class="two"><div><label for="amountInput">Amount</label><input id="amountInput" inputmode="decimal" placeholder="0.00" required></div><div><label for="dateInput">Date</label><input id="dateInput" type="date" required></div></div><label for="noteInput">Description</label><input id="noteInput" placeholder="What was it for?" maxlength="120"><label for="categoryInput">Category</label><select id="categoryInput"></select><div class="error" id="formError"></div><div class="actions"><button type="button" class="danger" id="deleteExpense" hidden>Delete</button><button type="submit" class="primary">Save expense</button></div></form></div></div><div class="toast" id="toast"></div>
+<script>
+const boot=${boot};let expenses=boot.expenses,budget=boot.budget,editing=null;
+window.__novaQueue=[];window.__novaWake=null;
+function send(action){window.__novaQueue.push(action);if(window.__novaWake)window.__novaWake()}
+const byId=id=>document.getElementById(id);
+const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n);
+function day(s){const d=new Date(s);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+const month=s=>day(s).slice(0,7),today=()=>day(new Date());
+const monthLabel=k=>new Date(k+'-01T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'});
+const total=list=>list.reduce((n,e)=>n+Math.round(e.amount*100),0)/100;
+const sorted=list=>list.slice().sort((a,b)=>b.date.localeCompare(a.date));
+function el(tag,cls,text){const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x}
+function showTab(name){for(const id of ['overview','history','settings'])byId(id).hidden=id!==name;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));render()}
+function expenseRow(e){const b=el('button','expense');b.type='button';const left=el('span');left.append(el('span','note',e.note||e.category),el('small','',e.category+' · '+new Date(e.date).toLocaleDateString()));b.append(left,el('b','',money(e.amount)));b.onclick=()=>openForm(e);return b}
+function render(){
+ const key=month(new Date()),current=expenses.filter(e=>month(e.date)===key),spent=total(current);
+ byId('heroMonth').textContent=monthLabel(key);byId('heroAmount').textContent=money(spent);byId('todayAmount').textContent=money(total(current.filter(e=>day(e.date)===today())));byId('count').textContent=String(current.length);
+ byId('budgetLine').textContent=budget>0?(spent<=budget?money(budget-spent)+' left of '+money(budget)+' target':money(spent-budget)+' over '+money(budget)+' target'):'Set a monthly target in Settings';
+ byId('progress').hidden=budget<=0;const progress=byId('progress').firstElementChild;progress.style.width=(budget>0?Math.min(100,spent/budget*100):0)+'%';progress.classList.toggle('over',spent>budget);
+ const grouped={};current.forEach(e=>grouped[e.category]=(grouped[e.category]||0)+e.amount);const categories=Object.entries(grouped).sort((a,b)=>b[1]-a[1]);const box=byId('categories');box.replaceChildren();
+ if(!categories.length)box.append(el('div','empty','No expenses this month yet.'));
+ for(const [cat,value] of categories){const idx=boot.categories.indexOf(cat),color=boot.colors[idx]||'#94a3b8',row=el('div','cat'),name=el('span','',cat);name.style.color=color;row.append(name,el('strong','',money(value)));const bar=el('div','bar'),fill=el('span');fill.style.background=color;fill.style.width=(spent?value/spent*100:0)+'%';bar.append(fill);row.append(bar);box.append(row)}
+ const recent=byId('recent');recent.replaceChildren();const latest=sorted(expenses).slice(0,5);if(!latest.length)recent.append(el('div','empty','No expenses logged yet. Tap + Add to start.'));else latest.forEach(e=>recent.append(expenseRow(e)));
+ const months=Array.from(new Set([key,...expenses.map(e=>month(e.date))])).sort().reverse(),select=byId('monthFilter'),old=select.value;select.replaceChildren();for(const m of months){const o=el('option','',monthLabel(m));o.value=m;select.append(o)}select.value=months.includes(old)?old:key;
+ const list=sorted(expenses.filter(e=>month(e.date)===select.value));byId('historySummary').textContent=list.length+' expenses · '+money(total(list));const summary=byId('historyCategories');summary.replaceChildren();const sums={};list.forEach(e=>sums[e.category]=(sums[e.category]||0)+e.amount);for(const [cat,value] of Object.entries(sums).sort((a,b)=>b[1]-a[1])){const row=el('div','cat');row.append(el('span','',cat),el('strong','',money(value)));summary.append(row)}summary.hidden=!list.length;const history=byId('historyList');history.replaceChildren();if(!list.length)history.append(el('div','empty','No expenses for this month.'));else list.forEach(e=>history.append(expenseRow(e)));
+ byId('budgetInput').value=budget?budget.toFixed(2):'';
+}
 
-  const a = new Alert();
-  a.title = "Delete Last Expense?";
-  a.message =
-    `${money(last.amount)} - ${last.note}`;
+function openForm(e){editing=e?e.id:null;byId('formTitle').textContent=e?'Edit expense':'New expense';byId('amountInput').value=e?Number(e.amount).toFixed(2):'';byId('noteInput').value=e?e.note:'';byId('dateInput').value=e?day(e.date):today();byId('categoryInput').value=e?e.category:boot.categories[0];byId('deleteExpense').hidden=!e;byId('formError').textContent='';byId('overlay').classList.add('open');setTimeout(()=>byId('amountInput').focus(),150)}
+function closeForm(){byId('overlay').classList.remove('open');editing=null}
+function toast(message){const x=byId('toast');x.textContent=message;x.style.display='block';setTimeout(()=>x.style.display='none',3500)}
+window.nativeResult=function(result){if(result.error){if(byId('overlay').classList.contains('open'))byId('formError').textContent=result.error;else toast(result.error);return}if(result.expenses)expenses=result.expenses;if(typeof result.budget==='number')budget=result.budget;if(result.close)closeForm();render();if(result.message)toast(result.message)};
+boot.categories.forEach(c=>{const o=el('option','',c);o.value=c;byId('categoryInput').append(o)});
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));byId('addTop').onclick=byId('addHistory').onclick=()=>openForm();byId('seeAll').onclick=()=>showTab('history');byId('closeForm').onclick=closeForm;byId('monthFilter').onchange=render;
+byId('expenseForm').onsubmit=e=>{e.preventDefault();byId('formError').textContent='';send({type:'save',id:editing,amount:byId('amountInput').value,note:byId('noteInput').value,category:byId('categoryInput').value,date:byId('dateInput').value})};
+byId('deleteExpense').onclick=()=>{if(confirm('Delete this expense?'))send({type:'delete',id:editing})};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});
+render();if(boot.startAdding)openForm();
+</script></body></html>`;
+}
 
-  a.addDestructiveAction("Delete");
-  a.addCancelAction("Cancel");
-
-  if (await a.presentAlert() === 0) {
-    data.pop();
-    save(data);
+async function showApp(state, startAdding) {
+  const web = new WebView();
+  await web.loadHTML(makeHTML(state, startAdding));
+  const closed = web.present(false).then(() => ({ closed: true }));
+  const bridge = "if(window.__novaQueue.length){completion(window.__novaQueue.shift())}else{window.__novaWake=function(){window.__novaWake=null;completion(window.__novaQueue.shift())}}";
+  while (true) {
+    let event;
+    try { event = await Promise.race([closed, web.evaluateJavaScript(bridge, true).then(value => ({ value }))]); }
+    catch (_) { break; }
+    if (event.closed) break;
+    const action = event.value;
+    if (!action || typeof action !== "object") continue;
+    let result = {};
+    try {
+      if (action.type === "save") {
+        const amount = amountFrom(action.amount);
+        if (!CATEGORIES.includes(action.category)) throw new Error("Choose a category.");
+        const note = String(action.note || "").trim().slice(0, 120) || action.category;
+        const index = action.id == null ? -1 : state.expenses.findIndex(e => String(e.id) === String(action.id));
+        if (action.id != null && index < 0) throw new Error("Expense not found. Reopen the tracker.");
+        const previous = index >= 0 ? state.expenses[index] : null;
+        const entry = { id: previous ? previous.id : Date.now() + "-" + Math.random(), amount, note,
+          category: action.category, date: dateFor(action.date, previous && previous.date) };
+        const next = state.expenses.slice();
+        if (index < 0) next.push(entry); else next[index] = entry;
+        await saveExpenses(next); state.expenses = next;
+        result = { expenses: next, close: true, message: index < 0 ? "Expense saved" : "Expense updated" };
+      } else if (action.type === "delete") {
+        if (!state.expenses.some(e => String(e.id) === String(action.id))) throw new Error("Expense not found.");
+        const next = state.expenses.filter(e => String(e.id) !== String(action.id));
+        await saveExpenses(next); state.expenses = next;
+        result = { expenses: next, close: true, message: "Expense deleted" };
+      } else if (action.type === "budget") {
+        const budget = amountFrom(action.amount, true);
+        saveBudget(budget); state.budget = budget;
+        result = { budget, message: "Monthly target saved" };
+      } else if (action.type === "exportCSV") {
+        await DocumentPicker.exportString(exportCSV(state.expenses), "spending-tracker.csv");
+        result = { message: "CSV exported" };
+      } else if (action.type === "exportJSON") {
+        await DocumentPicker.exportString(JSON.stringify(state.expenses, null, 2), DATA_NAME);
+        result = { message: "JSON exported" };
+      }
+    } catch (error) { result = { error: String(error.message || error) }; }
+    try { await web.evaluateJavaScript("window.nativeResult(" + safeJSON(result) + ")", false); }
+    catch (_) { break; }
   }
 }
 
-// --------------------
-// WIDGET DESIGN
-// --------------------
-
-function makeWidget() {
-  const data = load();
-  const now = new Date();
-
-  const month = monthKey(now);
-  const today = dayKey(now);
-
-  const monthly = data.filter(e =>
-    monthKey(e.date) === month
-  );
-
-  const total = monthly.reduce(
-    (sum, e) => sum + e.amount, 0
-  );
-
-  const todayTotal = monthly
-    .filter(e => dayKey(e.date) === today)
-    .reduce((sum, e) => sum + e.amount, 0);
-
-  const grouped = {};
-
-  for (const e of monthly) {
-    grouped[e.category] =
-      (grouped[e.category] || 0) + e.amount;
-  }
-
-  const categories = Object.entries(grouped)
-    .sort((a, b) => b[1] - a[1]);
-
+function makeWidget(state, error) {
   const widget = new ListWidget();
-
-  widget.backgroundColor =
-    new Color("#111827");
-
+  widget.backgroundColor = new Color("#111827");
   widget.setPadding(15, 16, 15, 16);
-  widget.spacing = 5;
-
-  // Header
-
-  const header = widget.addText(
-    "SPENDING TRACKER"
-  );
-
-  header.font =
-    Font.semiboldSystemFont(10);
-
-  header.textColor =
-    new Color("#94A3B8");
-
-  widget.addSpacer(4);
-
-  // Month
-
-  const monthLabel = widget.addText(
-    now.toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric"
-    })
-  );
-
-  monthLabel.font = Font.systemFont(11);
-  monthLabel.textColor =
-    new Color("#94A3B8");
-
-  // Total spending
-
-  const amount = widget.addText(
-    money(total)
-  );
-
-  amount.font =
-    Font.boldSystemFont(27);
-
-  amount.textColor = Color.white();
-  amount.minimumScaleFactor = 0.6;
-  amount.lineLimit = 1;
-
-  // Daily spending and add button
-
-  const row = widget.addStack();
-  row.layoutHorizontally();
-  row.centerAlignContent();
-
-  const daily = row.addText(
-    "Today  " + money(todayTotal)
-  );
-
-  daily.font =
-    Font.mediumSystemFont(11);
-
-  daily.textColor =
-    new Color("#CBD5E1");
-
+  const header = widget.addText("SPENDING TRACKER");
+  header.font = Font.semiboldSystemFont(10);
+  header.textColor = new Color("#94A3B8");
+  widget.addSpacer(8);
+  if (error) {
+    const text = widget.addText("Open tracker to check iCloud data");
+    text.font = Font.mediumSystemFont(13);
+    text.textColor = Color.white();
+    return widget;
+  }
+  const now = new Date(), current = state.expenses.filter(e => monthOf(e.date) === monthOf(now));
+  const spent = current.reduce((n, e) => n + e.amount, 0);
+  const today = current.filter(e => dayOf(e.date) === dayOf(now)).reduce((n, e) => n + e.amount, 0);
+  const monthText = widget.addText(now.toLocaleDateString("en-US", { month: "long", year: "numeric" }));
+  monthText.font = Font.systemFont(11); monthText.textColor = new Color("#94A3B8");
+  const totalText = widget.addText(money(spent));
+  totalText.font = Font.boldSystemFont(27); totalText.textColor = Color.white();
+  totalText.minimumScaleFactor = 0.6; totalText.lineLimit = 1;
+  const row = widget.addStack(); row.layoutHorizontally();
+  const daily = row.addText("Today  " + money(today));
+  daily.font = Font.mediumSystemFont(11); daily.textColor = new Color("#CBD5E1");
   row.addSpacer();
-
-  const plus = row.addText("+ Add");
-
-  plus.font =
-    Font.semiboldSystemFont(12);
-
-  plus.textColor =
-    new Color("#60A5FA");
-
-  // Open the script directly in Add mode
-  // when the widget is tapped.
-
+  const add = row.addText("Tap to add");
+  add.font = Font.semiboldSystemFont(11); add.textColor = new Color("#60A5FA");
   const baseURL = URLScheme.forRunningScript();
-  widget.url = baseURL +
-    (baseURL.includes("?") ? "&" : "?") +
-    "action=add";
-
-  widget.addSpacer(5);
-
-  // Category section
-
-  const section = widget.addText(
-    "TOP CATEGORIES"
-  );
-
-  section.font =
-    Font.semiboldSystemFont(9);
-
-  section.textColor =
-    new Color("#94A3B8");
-
-  const limit =
-    config.widgetFamily === "small" ? 2 : 4;
-
+  widget.url = baseURL + (baseURL.includes("?") ? "&" : "?") + "action=add";
+  if (state.budget > 0) {
+    widget.addSpacer(4);
+    const remaining = widget.addText(spent <= state.budget ?
+      money(state.budget - spent) + " left of target" : money(spent - state.budget) + " over target");
+    remaining.font = Font.mediumSystemFont(10);
+    remaining.textColor = spent <= state.budget ? new Color("#34D399") : new Color("#FB7185");
+  }
+  widget.addSpacer(8);
+  const section = widget.addText("TOP CATEGORIES");
+  section.font = Font.semiboldSystemFont(9); section.textColor = new Color("#94A3B8");
+  const grouped = {}; current.forEach(e => grouped[e.category] = (grouped[e.category] || 0) + e.amount);
+  const categories = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
   if (!categories.length) {
-    const empty = widget.addText(
-      "No expenses yet"
-    );
-
-    empty.font =
-      Font.systemFont(12);
-
-    empty.textColor =
-      new Color("#CBD5E1");
+    const empty = widget.addText("No expenses yet");
+    empty.font = Font.systemFont(12); empty.textColor = new Color("#CBD5E1");
   }
-
-  // Category rows
-
-  for (
-    const [category, value]
-    of categories.slice(0, limit)
-  ) {
-    const idx = CATEGORIES.indexOf(category);
-
-    const color =
-      COLORS[idx] || "#94A3B8";
-
-    const r = widget.addStack();
-    r.layoutHorizontally();
-    r.centerAlignContent();
-
-    const name = r.addText(category);
-
-    name.font =
-      Font.systemFont(10);
-
-    name.textColor =
-      new Color(color);
-
-    name.lineLimit = 1;
-    name.minimumScaleFactor = 0.7;
-
-    r.addSpacer(6);
-
-    const val = r.addText(
-      money(value)
-    );
-
-    val.font =
-      Font.mediumSystemFont(10);
-
-    val.textColor = Color.white();
-    val.lineLimit = 1;
-    val.minimumScaleFactor = 0.7;
+  const categoryLimit = config.widgetFamily === "small" ? (state.budget > 0 ? 1 : 2) :
+    (state.budget > 0 ? 2 : 4);
+  for (const [category, value] of categories.slice(0, categoryLimit)) {
+    const r = widget.addStack(); r.layoutHorizontally();
+    const name = r.addText(category); name.font = Font.systemFont(10);
+    name.textColor = new Color(COLORS[CATEGORIES.indexOf(category)] || "#94A3B8");
+    name.lineLimit = 1; name.minimumScaleFactor = 0.7; r.addSpacer(6);
+    const valueText = r.addText(money(value)); valueText.font = Font.mediumSystemFont(10);
+    valueText.textColor = Color.white(); valueText.lineLimit = 1; valueText.minimumScaleFactor = 0.7;
   }
-
-  // Refresh request
-  // Actual timing is controlled by iOS.
-
-  widget.refreshAfterDate =
-    new Date(Date.now() + 5 * 60 * 1000);
-
+  widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
   return widget;
 }
 
-// --------------------
-// MAIN
-// --------------------
-
 if (config.runsInWidget) {
-
-  Script.setWidget(makeWidget());
-
+  try { Script.setWidget(makeWidget(await loadState())); }
+  catch (error) { console.error(error); Script.setWidget(makeWidget(null, error)); }
 } else {
-
-  const action = args.queryParameters?.action;
-
-  if (action === "add") {
-
-    await addExpense();
-
-  } else {
-
-    const menu = new Alert();
-    menu.title = "Spending Tracker";
-    menu.message =
-      "What would you like to do?";
-
-    menu.addAction("Add Expense");
-    menu.addAction("View Expenses");
-    menu.addAction("Delete Last Expense");
-    menu.addAction("Preview Widget");
-    menu.addCancelAction("Cancel");
-
-    const selected =
-      await menu.presentSheet();
-
-    if (selected === 0) {
-
-      await addExpense();
-
-    } else if (selected === 1) {
-
-      await viewExpenses();
-
-    } else if (selected === 2) {
-
-      await deleteLast();
-
-    } else if (selected === 3) {
-
-      await makeWidget().presentMedium();
-
-    }
+  try { await showApp(await loadState(), args.queryParameters?.action === "add"); }
+  catch (error) {
+    const alert = new Alert(); alert.title = "Spending Tracker";
+    alert.message = "Could not open iCloud data: " + String(error.message || error) +
+      "\n\nYour existing local file was not removed.";
+    alert.addAction("OK"); await alert.presentAlert();
   }
 }
-
 Script.complete();
