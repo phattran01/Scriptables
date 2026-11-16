@@ -230,14 +230,56 @@ function widgetRow(parent, label, value, labelColor = "#CBD5E1", size = 11) {
   row.layoutHorizontally();
   row.centerAlignContent();
   widgetText(row, label, size, labelColor);
-  row.addSpacer(6);
+  row.addSpacer();
   widgetText(row, value, size, "#FFFFFF", "semibold");
   return row;
+}
+
+function widgetBar(parent, segments, width = 275) {
+  const height = 7;
+  const drawing = new DrawContext();
+  drawing.size = new Size(width, height);
+  drawing.opaque = false;
+  drawing.respectScreenScale = true;
+  drawing.setFillColor(new Color("#293B56"));
+  drawing.fillRect(new Rect(0, 0, width, height));
+  let offset = 0;
+  for (const segment of segments) {
+    const length = Math.min(width - offset, Math.max(0, width * segment.share));
+    if (length <= 0) continue;
+    drawing.setFillColor(new Color(segment.color));
+    drawing.fillRect(new Rect(offset, 0, length, height));
+    offset += length;
+  }
+  const image = parent.addImage(drawing.getImage());
+  image.imageSize = new Size(width, height);
+  image.cornerRadius = 3;
+}
+
+function widgetWeekChart(parent, daily, labels, width = 275) {
+  const drawing = new DrawContext();
+  drawing.size = new Size(width, 54);
+  drawing.opaque = false;
+  drawing.respectScreenScale = true;
+  const maximum = Math.max(1, ...daily);
+  const cell = width / 7;
+  for (let i = 0; i < 7; i++) {
+    const height = daily[i] > 0 ? Math.max(3, 34 * daily[i] / maximum) : 2;
+    drawing.setFillColor(new Color(daily[i] > 0 ? "#60A5FA" : "#34435C"));
+    drawing.fillRect(new Rect(i * cell + 8, 35 - height, cell - 16, height));
+    drawing.setFont(Font.mediumSystemFont(9));
+    drawing.setTextColor(new Color("#94A3B8"));
+    drawing.setTextAlignedCenter();
+    drawing.drawTextInRect(labels[i], new Rect(i * cell, 40, cell, 12));
+  }
+  const image = parent.addImage(drawing.getImage());
+  image.imageSize = new Size(width, 54);
 }
 
 function makeWidget(state, error, family = config.widgetFamily || "medium") {
   const small = family === "small";
   const large = family === "large" || family === "extraLarge";
+  const chartWidth = family === "extraLarge" ? 500 : 275;
   const widget = new ListWidget();
   widget.backgroundColor = new Color("#111827");
   widget.setPadding(small ? 13 : 17, small ? 13 : 18, small ? 13 : 17, small ? 13 : 18);
@@ -249,7 +291,7 @@ function makeWidget(state, error, family = config.widgetFamily || "medium") {
   widgetText(heading, small ? "SPENDING" : "SPENDING TRACKER", small ? 9 : 10, "#94A3B8", "semibold");
   heading.addSpacer();
   if (!small) widgetText(heading, "+ ADD", 10, "#60A5FA", "semibold");
-  widget.addSpacer(large ? 13 : 8);
+  widget.addSpacer(8);
 
   if (error) {
     widgetText(widget, "Open tracker to check iCloud data", 12, "#FFFFFF", "medium").lineLimit = 2;
@@ -262,62 +304,103 @@ function makeWidget(state, error, family = config.widgetFamily || "medium") {
   const spent = current.reduce((sum, e) => sum + e.amount, 0);
   const today = current.filter(e => dayOf(e.date) === dayOf(now))
     .reduce((sum, e) => sum + e.amount, 0);
-  const weekStart = new Date(now);
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() - 6);
-  const lastSevenDays = state.expenses.filter(e => {
-    const date = new Date(e.date);
-    return date >= weekStart && date <= now;
-  }).reduce((sum, e) => sum + e.amount, 0);
+  const grouped = {};
+  current.forEach(e => grouped[e.category] = (grouped[e.category] || 0) + e.amount);
+  const categories = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
   const monthLabel = now.toLocaleDateString("en-US", { month: small ? "short" : "long", year: "numeric" });
-  widgetText(widget, monthLabel, small ? 10 : 12, "#94A3B8");
-  widgetText(widget, money(spent), small ? 27 : large ? 36 : 29, "#FFFFFF", "bold");
-  widget.addSpacer(small ? 6 : 8);
-
+  const remaining = state.budget - spent;
+  const targetLabel = money(Math.abs(remaining)) + (remaining >= 0 ? " left of target" : " over target");
+  const targetColor = remaining >= 0 ? "#34D399" : "#FB7185";
   if (small) {
+    widgetText(widget, monthLabel, 10, "#94A3B8");
+    widgetText(widget, money(spent), 27, "#FFFFFF", "bold");
+    widget.addSpacer(6);
     widgetText(widget, "Today " + money(today), 10, "#CBD5E1", "medium");
-  } else {
-    widgetRow(widget, "Today", money(today), "#CBD5E1", large ? 12 : 11);
-    if (large) widgetRow(widget, "Last 7 days", money(lastSevenDays), "#CBD5E1", 12);
-  }
-
-  if (state.budget > 0) {
-    widget.addSpacer(5);
-    const remaining = state.budget - spent;
-    const label = money(Math.abs(remaining)) + (remaining >= 0 ? " left of target" : " over target");
-    widgetText(widget, label, small ? 9 : 11, remaining >= 0 ? "#34D399" : "#FB7185", "medium");
-  }
-
-  if (!small) {
-    widget.addSpacer(large ? 17 : 10);
-    widgetText(widget, "TOP CATEGORIES", 9, "#94A3B8", "semibold");
-    widget.addSpacer(4);
-    const grouped = {};
-    current.forEach(e => grouped[e.category] = (grouped[e.category] || 0) + e.amount);
-    const categories = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
-    if (!categories.length) widgetText(widget, "No expenses this month", 11, "#CBD5E1");
-    const limit = family === "extraLarge" ? 6 : large ? 3 : 2;
-    for (const [category, value] of categories.slice(0, limit)) {
-      const color = COLORS[CATEGORIES.indexOf(category)] || "#94A3B8";
-      widgetRow(widget, category, money(value), color, large ? 12 : 10);
-      if (large) widget.addSpacer(2);
-    }
-  }
-
-  if (large) {
-    widget.addSpacer(15);
-    widgetText(widget, "RECENT EXPENSES", 9, "#94A3B8", "semibold");
-    widget.addSpacer(5);
-    const recent = state.expenses.slice().sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, family === "extraLarge" ? 5 : 2);
-    if (!recent.length) widgetText(widget, "Nothing logged yet", 11, "#CBD5E1");
-    for (const entry of recent) {
-      widgetRow(widget, entry.note, money(entry.amount), "#FFFFFF", 12);
-      widgetText(widget, entry.category + " · " + new Date(entry.date).toLocaleDateString("en-US", {
-        month: "short", day: "numeric"
-      }), 9, "#94A3B8");
+    if (state.budget > 0) {
       widget.addSpacer(5);
+      widgetText(widget, targetLabel, 9, targetColor, "medium");
     }
+  } else if (!large) {
+    const columns = widget.addStack();
+    columns.layoutHorizontally();
+    const left = columns.addStack();
+    left.layoutVertically();
+    widgetText(left, monthLabel, 11, "#94A3B8");
+    widgetText(left, money(spent), 28, "#FFFFFF", "bold");
+    left.addSpacer(5);
+    widgetText(left, "Today " + money(today), 10, "#CBD5E1", "medium");
+    if (state.budget > 0) widgetText(left, targetLabel, 9, targetColor, "medium");
+    columns.addSpacer();
+    const right = columns.addStack();
+    right.layoutVertically();
+    widgetText(right, "TOP CATEGORIES", 9, "#94A3B8", "semibold");
+    right.addSpacer(4);
+    if (!categories.length) widgetText(right, "No expenses yet", 10, "#CBD5E1");
+    for (const [category, value] of categories.slice(0, 2)) {
+      widgetText(right, category, 10, COLORS[CATEGORIES.indexOf(category)] || "#94A3B8");
+      widgetText(right, money(value), 11, "#FFFFFF", "semibold");
+    }
+    widget.addSpacer(9);
+    if (state.budget > 0) {
+      widgetBar(widget, [{ share: Math.min(1, spent / state.budget), color: targetColor }], chartWidth);
+    } else {
+      widgetBar(widget, categories.map(([category, value]) => ({
+        share: spent ? value / spent : 0,
+        color: COLORS[CATEGORIES.indexOf(category)] || "#94A3B8"
+      })), chartWidth);
+    }
+  } else {
+    const columns = widget.addStack();
+    columns.layoutHorizontally();
+    const summary = columns.addStack();
+    summary.layoutVertically();
+    widgetText(summary, monthLabel, 11, "#94A3B8");
+    widgetText(summary, money(spent), 32, "#FFFFFF", "bold");
+    summary.addSpacer(4);
+    widgetText(summary, "Today " + money(today), 10, "#CBD5E1", "medium");
+    if (state.budget > 0) widgetText(summary, targetLabel, 9, targetColor, "medium");
+    columns.addSpacer();
+    const categoryColumn = columns.addStack();
+    categoryColumn.layoutVertically();
+    widgetText(categoryColumn, "TOP CATEGORIES", 9, "#94A3B8", "semibold");
+    categoryColumn.addSpacer(4);
+    if (!categories.length) widgetText(categoryColumn, "No expenses yet", 10, "#CBD5E1");
+    for (const [category, value] of categories.slice(0, 3)) {
+      widgetText(categoryColumn, category, 10, COLORS[CATEGORIES.indexOf(category)] || "#94A3B8");
+      widgetText(categoryColumn, money(value), 10, "#FFFFFF", "semibold");
+    }
+    widget.addSpacer(8);
+    if (state.budget > 0) {
+      widgetBar(widget, [{ share: Math.min(1, spent / state.budget), color: targetColor }], chartWidth);
+    } else {
+      widgetBar(widget, categories.map(([category, value]) => ({
+        share: spent ? value / spent : 0,
+        color: COLORS[CATEGORIES.indexOf(category)] || "#94A3B8"
+      })), chartWidth);
+    }
+
+    const daily = [], labels = [];
+    for (let daysAgo = 6; daysAgo >= 0; daysAgo--) {
+      const day = new Date(now);
+      day.setHours(12, 0, 0, 0);
+      day.setDate(day.getDate() - daysAgo);
+      const key = dayOf(day);
+      daily.push(state.expenses.filter(e => dayOf(e.date) === key)
+        .reduce((sum, e) => sum + e.amount, 0));
+      labels.push(day.toLocaleDateString("en-US", { weekday: "short" }));
+    }
+    widget.addSpacer(9);
+    widgetRow(widget, "LAST 7 DAYS", money(daily.reduce((sum, value) => sum + value, 0)), "#94A3B8", 9);
+    widget.addSpacer(3);
+    widgetWeekChart(widget, daily, labels, chartWidth);
+
+    widget.addSpacer(8);
+    widgetText(widget, "RECENT EXPENSES", 9, "#94A3B8", "semibold");
+    widget.addSpacer(3);
+    const recent = state.expenses.slice().sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, family === "extraLarge" ? 4 : 2);
+    if (!recent.length) widgetText(widget, "Nothing logged yet", 11, "#CBD5E1");
+    for (const entry of recent) widgetRow(widget, entry.note, money(entry.amount), "#FFFFFF", 11);
   }
 
   widget.addSpacer();

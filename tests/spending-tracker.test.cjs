@@ -161,32 +161,61 @@ test('widget families show progressively more detail', () => {
     constructor() { this.children = []; }
     addText(value) { const child = { text: String(value) }; this.children.push(child); return child; }
     addStack() { const child = new WidgetNode(); this.children.push(child); return child; }
+    addImage(image) { const child = { image }; this.children.push(child); return child; }
     addSpacer() { this.children.push({ spacer: true }); }
     setPadding() {}
     layoutHorizontally() {}
+    layoutVertically() {}
     centerAlignContent() {}
   }
   context.ListWidget = WidgetNode;
   context.Color = class Color { constructor(value) { this.value = value; } };
+  context.Size = class Size { constructor(width, height) { Object.assign(this, { width, height }); } };
+  context.Rect = class Rect { constructor(x, y, width, height) { Object.assign(this, { x, y, width, height }); } };
+  context.DrawContext = class DrawContext {
+    constructor() { this.rects = []; this.labels = []; }
+    setFillColor() {}
+    fillRect(rect) { this.rects.push(rect); }
+    setFont() {}
+    setTextColor() {}
+    setTextAlignedCenter() {}
+    drawTextInRect(label) { this.labels.push(label); }
+    getImage() { return { rects: this.rects, labels: this.labels }; }
+  };
   context.Font = Object.fromEntries(['systemFont', 'mediumSystemFont', 'semiboldSystemFont', 'boldSystemFont']
     .map(name => [name, size => ({ name, size })]));
   context.URLScheme = { forRunningScript: () => 'scriptable:///run/Manual-Spending-Tracker' };
   context.config = { widgetFamily: 'small' };
   context.state = { expenses: [{ id: 'one', amount: 26.12, note: 'Lunch',
     category: 'Food & Drinks', date: new Date().toISOString() }], budget: 2000 };
-  const texts = family => {
+  const render = family => {
     context.family = family;
     const widget = vm.runInContext('makeWidget(state, null, family)', context);
     const collect = node => node.children.flatMap(child => child.text === undefined ?
       (child.children ? collect(child) : []) : [child.text]);
-    return collect(widget);
+    const images = node => node.children.flatMap(child => child.image ? [child.image] :
+      (child.children ? images(child) : []));
+    return { widget, texts: collect(widget), images: images(widget) };
   };
-  const small = texts('small'), medium = texts('medium'), large = texts('large');
-  assert.ok(small.some(text => text.includes('$26.12')));
-  assert.ok(!small.includes('TOP CATEGORIES'));
-  assert.ok(medium.includes('TOP CATEGORIES'));
-  assert.ok(!medium.includes('RECENT EXPENSES'));
-  assert.ok(large.includes('RECENT EXPENSES'));
-  assert.ok(large.includes('Last 7 days'));
-  assert.ok(large.includes('Lunch'));
+  const small = render('small'), medium = render('medium'), large = render('large');
+  assert.ok(small.texts.some(text => text.includes('$26.12')));
+  assert.ok(!small.texts.includes('TOP CATEGORIES'));
+  assert.ok(medium.texts.includes('TOP CATEGORIES'));
+  assert.ok(!medium.texts.includes('RECENT EXPENSES'));
+  assert.equal(medium.images.length, 1);
+  assert.ok(medium.widget.children.some(child => child.children?.some(grandchild =>
+    grandchild.children?.some(item => item.text === 'TOP CATEGORIES'))));
+  assert.ok(large.texts.includes('RECENT EXPENSES'));
+  assert.ok(large.texts.includes('LAST 7 DAYS'));
+  assert.ok(large.texts.includes('Lunch'));
+  assert.equal(large.images.length, 2);
+  assert.equal(large.images[1].labels.length, 7);
+  assert.equal(large.images[1].rects.length, 7);
+  assert.equal(large.images[1].rects.at(-1).height, 34);
+
+  context.state = { expenses: [], budget: 0 };
+  const empty = render('large');
+  assert.ok(empty.texts.includes('No expenses yet'));
+  assert.ok(empty.texts.includes('Nothing logged yet'));
+  assert.equal(empty.images[1].rects.length, 7);
 });
