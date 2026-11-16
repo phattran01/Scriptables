@@ -1,4 +1,4 @@
-/* Manual Spending Tracker for Scriptable. Data is stored in iCloud Drive. */
+/* Manual Spending Tracker (NOVA) for Scriptable. Data is stored in iCloud Drive. */
 const CATEGORIES = ["Food & Drinks", "Shopping", "Transportation", "Entertainment", "Bills", "Subscriptions", "Health", "Other"];
 const COLORS = ["#60A5FA", "#A78BFA", "#34D399", "#FBBF24", "#FB7185", "#22D3EE", "#F472B6", "#94A3B8"];
 const DATA_NAME = "spending-tracker.json";
@@ -75,7 +75,7 @@ function exportCSV(data) {
 
 function makeHTML(state, startAdding, status = "", initialTab = "overview", attempt = null) {
   const boot = safeJSON({ ...state, categories: CATEGORIES, colors: COLORS, startAdding, status, initialTab, attempt });
-  return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><title>Spending Tracker</title>
+  return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><title>NOVA</title>
 <style>
 :root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#f8fafc;background:#0b1220}*{box-sizing:border-box}body{margin:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}button,input,select{font:inherit}button{cursor:pointer}
 main{max-width:650px;margin:auto;padding:22px 18px 45px}h1{font-size:30px;letter-spacing:-.04em;margin:6px 0 4px}h2{font-size:17px;margin:0 0 14px}.eyebrow{font-size:11px;letter-spacing:.15em;font-weight:800;color:#91a2bd}.muted{color:#9caec9}.top,.section-head,.expense,.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.top{align-items:flex-start}.section-head{margin:24px 2px 12px}.section-head h2{margin:0}
@@ -87,7 +87,7 @@ label{display:block;color:#a8b9d0;font-size:13px;font-weight:700;margin:15px 0 7
 .confirm-overlay{position:fixed;inset:0;background:#040912d9;z-index:15;display:none;align-items:center;justify-content:center;padding:20px}.confirm-overlay.open{display:flex}.confirm-card{width:100%;max-width:400px;background:#1c2a40;border:1px solid #4b5d78;border-radius:20px;padding:22px}.confirm-card p{color:#b7c6d9;line-height:1.45}
 .sheet{padding:18px 18px calc(14px + env(safe-area-inset-bottom));max-height:90vh;max-height:calc(100dvh - 12px)}.sheet-head h2{margin:0}.sheet-head{margin-bottom:12px}.form-label{display:block;color:#a8b9d0;font-size:12px;font-weight:700;margin:12px 0 6px}.form-label small{font-weight:400;color:#90a4bf}.amount-entry{display:flex;align-items:center;gap:5px;background:#101a2b;border:1px solid #3b4c65;border-radius:14px;padding:3px 13px}.amount-entry:focus-within{border-color:#60a5fa}.amount-entry span{font-size:29px;font-weight:700;color:#9caec9}.amount-entry input{border:0;background:transparent;padding:7px 0;font-size:32px;font-weight:750;min-width:0}.amount-entry input:focus{border:0}.category-strip{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0 5px}.category-strip::-webkit-scrollbar{display:none}.category-chip{flex:none;border:1px solid #405473;background:#101a2b;color:#dce8fa;border-radius:999px;padding:9px 12px;font-size:13px;font-weight:650;white-space:nowrap}.category-chip.active{background:#60a5fa;border-color:#60a5fa;color:#081729}.quick-note{margin-top:2px}.form-footer{display:flex;align-items:center;gap:10px;margin-top:13px}.form-footer .primary{flex:1;padding:14px}.form-footer .danger{padding:14px}.date-toggle{border:0;background:none;color:#9bc5fa;font-size:13px;padding:10px 0 2px;text-align:left}.date-details label{margin:8px 0 5px}.date-details input{padding:10px}.error:empty{display:none}.error:not(:empty){min-height:0;margin-top:10px}
 </style></head><body><main>
-<div class="top"><div><div class="eyebrow">NOVA · MONEY</div><h1>Spending Tracker</h1><div class="muted">Know where your money went.</div></div><button class="primary" id="addTop">+ Add</button></div>
+<div class="top"><div><div class="eyebrow">YOUR MONEY</div><h1>NOVA</h1><div class="muted">Know where your money went.</div></div><button class="primary" id="addTop">+ Add</button></div>
 <nav class="nav"><button class="active" data-tab="overview">Overview</button><button data-tab="history">History</button><button data-tab="settings">Settings</button></nav>
 <section id="overview"><div class="card hero"><div class="eyebrow" id="heroMonth"></div><div class="amount" id="heroAmount"></div><div class="muted" id="budgetLine"></div><div class="progress" id="progress" hidden><span></span></div><div class="stats"><div class="stat"><div class="muted">Today</div><strong id="todayAmount"></strong></div><div class="stat"><div class="muted">Transactions</div><strong id="count"></strong></div></div></div><div class="section-head"><h2>Top categories</h2></div><div class="card" id="categories"></div><div class="section-head"><h2>Recent expenses</h2><button class="secondary" id="seeAll">See all</button></div><div class="list" id="recent"></div></section>
 <section id="history" hidden><div class="section-head"><h2>Expense history</h2><button class="primary" id="addHistory">+ Add</button></div><label for="monthFilter">Month</label><select id="monthFilter"></select><div class="section-head"><div class="muted" id="historySummary"></div></div><div class="card" id="historyCategories"></div><div class="list" id="historyList"></div></section>
@@ -295,7 +295,7 @@ function makeAccessoryWidget(state, error, family) {
     const now = new Date();
     const spent = error ? null : state.expenses.filter(e => monthOf(e.date) === monthOf(now))
       .reduce((sum, e) => sum + e.amount, 0);
-    widgetText(widget, error ? "Open spending tracker" :
+    widgetText(widget, error ? "Open NOVA" :
       now.toLocaleDateString("en-US", { month: "short" }) + " spent " + money(spent),
       12, "#FFFFFF", "semibold");
     return widget;
@@ -303,7 +303,7 @@ function makeAccessoryWidget(state, error, family) {
 
   if (error) {
     widget.addSpacer();
-    widgetText(widget, family === "accessoryCircular" ? "!" : "Open spending tracker",
+    widgetText(widget, family === "accessoryCircular" ? "!" : "Open NOVA",
       family === "accessoryCircular" ? 22 : 12, "#FFFFFF", "semibold").centerAlignText();
     widget.addSpacer();
     return widget;
@@ -321,7 +321,7 @@ function makeAccessoryWidget(state, error, family) {
       14, "#FFFFFF", "bold").centerAlignText();
     widget.addSpacer();
   } else {
-    widgetText(widget, "SPENT THIS MONTH", 9, "#FFFFFF", "medium");
+    widgetText(widget, "NOVA · MONTH", 9, "#FFFFFF", "medium");
     widgetText(widget, money(spent), 18, "#FFFFFF", "bold");
     widget.addSpacer(2);
     widgetText(widget, "Today " + money(today), 10, "#FFFFFF", "medium");
@@ -344,13 +344,13 @@ function makeWidget(state, error, family = config.widgetFamily || "medium") {
 
   const heading = widget.addStack();
   heading.layoutHorizontally();
-  widgetText(heading, small ? "SPENDING" : "SPENDING TRACKER", small ? 9 : 10, "#94A3B8", "semibold");
+  widgetText(heading, "NOVA", small ? 9 : 10, "#94A3B8", "semibold");
   heading.addSpacer();
   if (!small) widgetText(heading, "+ ADD", 10, "#60A5FA", "semibold");
   widget.addSpacer(8);
 
   if (error) {
-    widgetText(widget, "Open tracker to check iCloud data", 12, "#FFFFFF", "medium").lineLimit = 2;
+    widgetText(widget, "Open NOVA to check iCloud data", 12, "#FFFFFF", "medium").lineLimit = 2;
     widget.addSpacer();
     return widget;
   }
@@ -472,7 +472,7 @@ if (config.runsInWidget) {
 } else {
   try { await showApp(await loadState(), args.queryParameters?.action === "add"); }
   catch (error) {
-    const alert = new Alert(); alert.title = "Spending Tracker";
+    const alert = new Alert(); alert.title = "NOVA";
     alert.message = "Could not open iCloud data: " + String(error.message || error) +
       "\n\nYour existing local file was not removed.";
     alert.addAction("OK"); await alert.presentAlert();

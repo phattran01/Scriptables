@@ -39,12 +39,14 @@ test('installer downloads code, backs up updates, and leaves spending data alone
   await app.run();
   assert.equal(app.files.get('cloud/Manual-Spending-Tracker.js'), tracker);
   assert.equal(app.files.get('cloud/spending-tracker.json'), '[{"amount":25.12}]');
-  assert.equal(app.alerts.at(-1).title, 'Tracker installed');
+  assert.equal(app.alerts.at(-1).title, 'NOVA installed');
+  assert.match(app.alerts.at(-1).message, /installed as Manual-Spending-Tracker/);
 
   app.files.set('cloud/Manual-Spending-Tracker.js', 'previous script');
   await app.run();
   assert.equal(app.files.get('cloud/Manual-Spending-Tracker-backup.txt'), 'previous script');
   assert.equal(app.files.get('cloud/Manual-Spending-Tracker.js'), tracker);
+  assert.equal(app.alerts.at(-1).title, 'NOVA updated');
 
   await app.run();
   assert.equal(app.alerts.at(-1).title, 'Already up to date');

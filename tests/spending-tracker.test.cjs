@@ -98,6 +98,8 @@ test('embedded WebView JavaScript parses', () => {
   const match = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(match);
   new vm.Script(match[1]);
+  assert.match(html, /<title>NOVA<\/title>/);
+  assert.match(html, /<h1>NOVA<\/h1>/);
   assert.match(html, /class="amount-entry"/);
   assert.match(html, /id="categoryChips"/);
   assert.match(html, /id="dateDetails" hidden/);
@@ -237,6 +239,9 @@ test('widget families show progressively more detail', () => {
     return { widget, texts: collect(widget), images: images(widget) };
   };
   const small = render('small'), medium = render('medium'), large = render('large');
+  assert.ok(small.texts.includes('NOVA'));
+  assert.ok(medium.texts.includes('NOVA'));
+  assert.ok(large.texts.includes('NOVA'));
   assert.ok(small.texts.some(text => text.includes('$26.12')));
   assert.ok(!small.texts.includes('TOP CATEGORIES'));
   assert.ok(medium.texts.includes('TOP CATEGORIES'));
@@ -266,7 +271,7 @@ test('widget families show progressively more detail', () => {
   assert.equal(inline.texts.length, 1);
   assert.match(inline.texts[0], /spent \$26\.12/);
   assert.deepEqual(circular.texts, ['TODAY', '$26.12']);
-  assert.deepEqual(rectangular.texts, ['SPENT THIS MONTH', '$26.12', 'Today $26.12']);
+  assert.deepEqual(rectangular.texts, ['NOVA · MONTH', '$26.12', 'Today $26.12']);
   for (const accessory of [inline, circular, rectangular]) {
     assert.equal(accessory.widget.backgroundColor, undefined);
     assert.match(accessory.widget.url, /action=add$/);
@@ -275,5 +280,5 @@ test('widget families show progressively more detail', () => {
   context.state = null;
   context.family = 'accessoryRectangular';
   const failure = vm.runInContext('makeWidget(state, new Error("iCloud unavailable"), family)', context);
-  assert.equal(failure.children.find(child => child.text)?.text, 'Open spending tracker');
+  assert.equal(failure.children.find(child => child.text)?.text, 'Open NOVA');
 });

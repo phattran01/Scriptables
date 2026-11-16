@@ -3,8 +3,8 @@ const SOURCE_URL = "https://raw.githubusercontent.com/phattran01/Scriptables/mai
 const SCRIPT_NAME = "Manual-Spending-Tracker.js";
 const BACKUP_NAME = "Manual-Spending-Tracker-backup.txt";
 
-let title = "Tracker updated";
-let message = "Manual-Spending-Tracker is ready in Scriptable.";
+let title = "NOVA updated";
+let message = "NOVA is ready in Scriptable.";
 
 try {
   const request = new Request(SOURCE_URL);
@@ -29,14 +29,14 @@ try {
 
   if (previous === code) {
     title = "Already up to date";
-    message = "Manual-Spending-Tracker already matches GitHub.";
+    message = "NOVA already matches GitHub.";
   } else {
     if (previous !== null) fm.writeString(backup, previous);
     fm.writeString(target, code);
-    if (previous === null) title = "Tracker installed";
+    if (previous === null) title = "NOVA installed";
     message = previous === null
-      ? "Manual-Spending-Tracker was installed. Select it in your widget."
-      : "Manual-Spending-Tracker was updated. Your previous script code is saved as a .txt backup.";
+      ? "NOVA was installed as Manual-Spending-Tracker. Select that script in your widget."
+      : "NOVA was updated. Your previous script code is saved as a .txt backup.";
   }
 } catch (error) {
   title = "Install failed";
