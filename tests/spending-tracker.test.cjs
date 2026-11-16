@@ -98,12 +98,14 @@ test('embedded WebView JavaScript parses', () => {
   const match = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(match);
   new vm.Script(match[1]);
+  assert.match(html, /class="amount-entry"/);
+  assert.match(html, /id="categoryChips"/);
+  assert.match(html, /id="dateDetails" hidden/);
 });
 
-test('delete button opens in-page confirmation and submits the selected expense', () => {
+function renderPage(state) {
   const { context } = setup();
-  context.state = { expenses: [{ id: 'old', amount: 25.12, note: 'panda',
-    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 0 };
+  context.state = state;
   const html = vm.runInContext('makeHTML(state, false)', context);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
@@ -112,6 +114,8 @@ test('delete button opens in-page confirmation and submits the selected expense'
       this.children = [];
       this.style = {};
       this.value = '';
+      this.dataset = {};
+      this.attributes = {};
       this.classList = {
         add: name => { this.classes.add(name); },
         remove: name => { this.classes.delete(name); },
@@ -122,6 +126,7 @@ test('delete button opens in-page confirmation and submits the selected expense'
     }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
+    setAttribute(name, value) { this.attributes[name] = value; }
     focus() {}
   }
   const elements = new Map();
@@ -145,7 +150,41 @@ test('delete button opens in-page confirmation and submits the selected expense'
   };
   vm.createContext(page);
   vm.runInContext(script, page);
+  return { get, page };
+}
+
+test('quick entry sends the selected category and date', () => {
+  const { get, page } = renderPage({ expenses: [{ id: 'old', amount: 25.12, note: 'panda',
+    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 0 });
+  get('addTop').onclick();
+  assert.equal(get('categoryChips').children[0].dataset.category, 'Food & Drinks');
+  assert.equal(get('categoryInput').value, 'Food & Drinks');
+  assert.equal(get('dateDetails').hidden, true);
+  get('amountInput').value = '14.50';
+  const health = get('categoryChips').children.find(chip => chip.dataset.category === 'Health');
+  health.onclick();
+  assert.equal(get('categoryInput').value, 'Health');
+  assert.equal(health.attributes['aria-pressed'], 'true');
+  get('dateToggle').onclick();
+  assert.equal(get('dateDetails').hidden, false);
+  get('dateInput').value = '2026-11-14';
+  get('dateInput').onchange();
+  assert.match(get('dateToggle').textContent, /Nov 14, 2026/);
+  get('expenseForm').onsubmit({ preventDefault() {} });
+  const payload = JSON.parse(decodeURIComponent(page.window.location.href.split('payload=')[1]));
+  assert.equal(payload.type, 'save');
+  assert.equal(payload.id, null);
+  assert.equal(payload.amount, '14.50');
+  assert.equal(payload.category, 'Health');
+  assert.equal(payload.date, '2026-11-14');
+});
+
+test('delete button opens in-page confirmation and submits the selected expense', () => {
+  const { get, page } = renderPage({ expenses: [{ id: 'old', amount: 25.12, note: 'panda',
+    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 0 });
   get('recent').children[0].onclick();
+  assert.equal(get('categoryInput').value, 'Food & Drinks');
+  assert.equal(get('saveExpense').textContent, 'Save changes');
   get('deleteExpense').onclick();
   assert.equal(get('deleteDialog').classList.contains('open'), true);
   assert.match(get('deleteMessage').textContent, /panda/);
