@@ -276,7 +276,55 @@ function widgetWeekChart(parent, daily, labels, width = 275) {
   image.imageSize = new Size(width, 54);
 }
 
+function makeAccessoryWidget(state, error, family) {
+  const widget = new ListWidget();
+  widget.setPadding(0, 0, 0, 0);
+  const baseURL = URLScheme.forRunningScript();
+  widget.url = baseURL + (baseURL.includes("?") ? "&" : "?") + "action=add";
+  widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+
+  if (family === "accessoryInline") {
+    const now = new Date();
+    const spent = error ? null : state.expenses.filter(e => monthOf(e.date) === monthOf(now))
+      .reduce((sum, e) => sum + e.amount, 0);
+    widgetText(widget, error ? "Open spending tracker" :
+      now.toLocaleDateString("en-US", { month: "short" }) + " spent " + money(spent),
+      12, "#FFFFFF", "semibold");
+    return widget;
+  }
+
+  if (error) {
+    widget.addSpacer();
+    widgetText(widget, family === "accessoryCircular" ? "!" : "Open spending tracker",
+      family === "accessoryCircular" ? 22 : 12, "#FFFFFF", "semibold").centerAlignText();
+    widget.addSpacer();
+    return widget;
+  }
+
+  const now = new Date();
+  const spent = state.expenses.filter(e => monthOf(e.date) === monthOf(now))
+    .reduce((sum, e) => sum + e.amount, 0);
+  const today = state.expenses.filter(e => dayOf(e.date) === dayOf(now))
+    .reduce((sum, e) => sum + e.amount, 0);
+  if (family === "accessoryCircular") {
+    widget.addSpacer();
+    widgetText(widget, "TODAY", 9, "#FFFFFF", "medium").centerAlignText();
+    widgetText(widget, today < 1000 ? money(today) : "$" + (today / 1000).toFixed(1) + "k",
+      14, "#FFFFFF", "bold").centerAlignText();
+    widget.addSpacer();
+  } else {
+    widgetText(widget, "SPENT THIS MONTH", 9, "#FFFFFF", "medium");
+    widgetText(widget, money(spent), 18, "#FFFFFF", "bold");
+    widget.addSpacer(2);
+    widgetText(widget, "Today " + money(today), 10, "#FFFFFF", "medium");
+  }
+  return widget;
+}
+
 function makeWidget(state, error, family = config.widgetFamily || "medium") {
+  if (["accessoryInline", "accessoryCircular", "accessoryRectangular"].includes(family)) {
+    return makeAccessoryWidget(state, error, family);
+  }
   const small = family === "small";
   const large = family === "large" || family === "extraLarge";
   const chartWidth = family === "extraLarge" ? 500 : 275;

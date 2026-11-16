@@ -159,7 +159,7 @@ test('widget families show progressively more detail', () => {
   const { context } = setup();
   class WidgetNode {
     constructor() { this.children = []; }
-    addText(value) { const child = { text: String(value) }; this.children.push(child); return child; }
+    addText(value) { const child = { text: String(value), centerAlignText() {} }; this.children.push(child); return child; }
     addStack() { const child = new WidgetNode(); this.children.push(child); return child; }
     addImage(image) { const child = { image }; this.children.push(child); return child; }
     addSpacer() { this.children.push({ spacer: true }); }
@@ -218,4 +218,23 @@ test('widget families show progressively more detail', () => {
   assert.ok(empty.texts.includes('No expenses yet'));
   assert.ok(empty.texts.includes('Nothing logged yet'));
   assert.equal(empty.images[1].rects.length, 7);
+
+  context.state = { expenses: [{ id: 'today', amount: 26.12, note: 'Lunch',
+    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 2000 };
+  const inline = render('accessoryInline');
+  const circular = render('accessoryCircular');
+  const rectangular = render('accessoryRectangular');
+  assert.equal(inline.texts.length, 1);
+  assert.match(inline.texts[0], /spent \$26\.12/);
+  assert.deepEqual(circular.texts, ['TODAY', '$26.12']);
+  assert.deepEqual(rectangular.texts, ['SPENT THIS MONTH', '$26.12', 'Today $26.12']);
+  for (const accessory of [inline, circular, rectangular]) {
+    assert.equal(accessory.widget.backgroundColor, undefined);
+    assert.match(accessory.widget.url, /action=add$/);
+    assert.equal(accessory.images.length, 0);
+  }
+  context.state = null;
+  context.family = 'accessoryRectangular';
+  const failure = vm.runInContext('makeWidget(state, new Error("iCloud unavailable"), family)', context);
+  assert.equal(failure.children.find(child => child.text)?.text, 'Open spending tracker');
 });
