@@ -84,6 +84,10 @@ test('WebView actions save expenses and budgets and reject invalid amounts', asy
     category: 'Food & Drinks', date: '2026-11-15' }, 'Enter dollars');
   assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 2);
 
+  const added = JSON.parse(files.cloud.get('cloud/spending-tracker.json'))[1];
+  await send({ type: 'delete', id: added.id }, 'Expense deleted');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 1);
+
   web.dismiss();
   await running;
 });
@@ -94,4 +98,95 @@ test('embedded WebView JavaScript parses', () => {
   const match = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(match);
   new vm.Script(match[1]);
+});
+
+test('delete button opens in-page confirmation and submits the selected expense', () => {
+  const { context } = setup();
+  context.state = { expenses: [{ id: 'old', amount: 25.12, note: 'panda',
+    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 0 };
+  const html = vm.runInContext('makeHTML(state, false)', context);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  class Element {
+    constructor() {
+      this.children = [];
+      this.style = {};
+      this.value = '';
+      this.classList = {
+        add: name => { this.classes.add(name); },
+        remove: name => { this.classes.delete(name); },
+        contains: name => this.classes.has(name),
+        toggle: (name, force) => { if (force) this.classes.add(name); else this.classes.delete(name); }
+      };
+      this.classes = new Set();
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    focus() {}
+  }
+  const elements = new Map();
+  const get = id => {
+    if (!elements.has(id)) elements.set(id, new Element());
+    return elements.get(id);
+  };
+  get('progress').firstElementChild = new Element();
+  const nav = ['overview', 'history', 'settings'].map(tab => {
+    const button = new Element(); button.dataset = { tab }; return button;
+  });
+  const page = {
+    document: {
+      getElementById: get,
+      createElement: () => new Element(),
+      querySelectorAll: () => nav
+    },
+    window: { location: { href: '' } },
+    setTimeout: () => 1,
+    clearTimeout: () => {}
+  };
+  vm.createContext(page);
+  vm.runInContext(script, page);
+  get('recent').children[0].onclick();
+  get('deleteExpense').onclick();
+  assert.equal(get('deleteDialog').classList.contains('open'), true);
+  assert.match(get('deleteMessage').textContent, /panda/);
+  get('confirmDelete').onclick();
+  const payload = decodeURIComponent(page.window.location.href.split('payload=')[1]);
+  assert.equal(JSON.parse(payload).type, 'delete');
+  assert.equal(JSON.parse(payload).id, 'old');
+});
+
+test('widget families show progressively more detail', () => {
+  const { context } = setup();
+  class WidgetNode {
+    constructor() { this.children = []; }
+    addText(value) { const child = { text: String(value) }; this.children.push(child); return child; }
+    addStack() { const child = new WidgetNode(); this.children.push(child); return child; }
+    addSpacer() { this.children.push({ spacer: true }); }
+    setPadding() {}
+    layoutHorizontally() {}
+    centerAlignContent() {}
+  }
+  context.ListWidget = WidgetNode;
+  context.Color = class Color { constructor(value) { this.value = value; } };
+  context.Font = Object.fromEntries(['systemFont', 'mediumSystemFont', 'semiboldSystemFont', 'boldSystemFont']
+    .map(name => [name, size => ({ name, size })]));
+  context.URLScheme = { forRunningScript: () => 'scriptable:///run/Manual-Spending-Tracker' };
+  context.config = { widgetFamily: 'small' };
+  context.state = { expenses: [{ id: 'one', amount: 26.12, note: 'Lunch',
+    category: 'Food & Drinks', date: new Date().toISOString() }], budget: 2000 };
+  const texts = family => {
+    context.family = family;
+    const widget = vm.runInContext('makeWidget(state, null, family)', context);
+    const collect = node => node.children.flatMap(child => child.text === undefined ?
+      (child.children ? collect(child) : []) : [child.text]);
+    return collect(widget);
+  };
+  const small = texts('small'), medium = texts('medium'), large = texts('large');
+  assert.ok(small.some(text => text.includes('$26.12')));
+  assert.ok(!small.includes('TOP CATEGORIES'));
+  assert.ok(medium.includes('TOP CATEGORIES'));
+  assert.ok(!medium.includes('RECENT EXPENSES'));
+  assert.ok(large.includes('RECENT EXPENSES'));
+  assert.ok(large.includes('Last 7 days'));
+  assert.ok(large.includes('Lunch'));
 });

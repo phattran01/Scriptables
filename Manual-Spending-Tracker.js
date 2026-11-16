@@ -84,13 +84,14 @@ main{max-width:650px;margin:auto;padding:22px 18px 45px}h1{font-size:30px;letter
 .cat{display:grid;grid-template-columns:1fr auto;gap:5px 14px;margin:15px 0}.bar{grid-column:1/-1;height:5px;background:#26344c;border-radius:5px;overflow:hidden}.bar span{display:block;height:100%}.list{display:grid;gap:9px}.expense{width:100%;text-align:left;background:#172338;border:1px solid #2c3c56;border-radius:14px;padding:13px;color:white}.expense .note{font-weight:700}.expense small{display:block;color:#96a9c6;margin-top:4px}.expense b{white-space:nowrap}.empty{padding:18px 0;color:#9caec9}
 label{display:block;color:#a8b9d0;font-size:13px;font-weight:700;margin:15px 0 7px}input,select{width:100%;border:1px solid #3b4c65;border-radius:12px;background:#101a2b;color:white;padding:13px;outline:none}input:focus,select:focus{border-color:#60a5fa}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.actions{display:flex;gap:9px;margin-top:18px}.actions button{flex:1}.hint{font-size:12px;line-height:1.5;color:#90a4bf}
 .overlay{position:fixed;inset:0;background:#040912c9;z-index:10;display:none;align-items:flex-end}.overlay.open{display:flex}.sheet{background:#172338;border:1px solid #3a4e69;border-radius:24px 24px 0 0;padding:24px 20px calc(25px + env(safe-area-inset-bottom));width:100%;max-width:650px;margin:auto;max-height:90vh;overflow:auto}.sheet-head button{background:none;border:0;color:#b6c6dc;font-size:28px}.error{color:#fda4af;min-height:19px;font-size:13px;margin-top:10px}.toast{position:fixed;bottom:25px;left:18px;right:18px;max-width:600px;margin:auto;background:#25446b;border:1px solid #5687bf;border-radius:13px;padding:13px 16px;z-index:20;display:none}
+.confirm-overlay{position:fixed;inset:0;background:#040912d9;z-index:15;display:none;align-items:center;justify-content:center;padding:20px}.confirm-overlay.open{display:flex}.confirm-card{width:100%;max-width:400px;background:#1c2a40;border:1px solid #4b5d78;border-radius:20px;padding:22px}.confirm-card p{color:#b7c6d9;line-height:1.45}
 </style></head><body><main>
 <div class="top"><div><div class="eyebrow">NOVA · MONEY</div><h1>Spending Tracker</h1><div class="muted">Know where your money went.</div></div><button class="primary" id="addTop">+ Add</button></div>
 <nav class="nav"><button class="active" data-tab="overview">Overview</button><button data-tab="history">History</button><button data-tab="settings">Settings</button></nav>
 <section id="overview"><div class="card hero"><div class="eyebrow" id="heroMonth"></div><div class="amount" id="heroAmount"></div><div class="muted" id="budgetLine"></div><div class="progress" id="progress" hidden><span></span></div><div class="stats"><div class="stat"><div class="muted">Today</div><strong id="todayAmount"></strong></div><div class="stat"><div class="muted">Transactions</div><strong id="count"></strong></div></div></div><div class="section-head"><h2>Top categories</h2></div><div class="card" id="categories"></div><div class="section-head"><h2>Recent expenses</h2><button class="secondary" id="seeAll">See all</button></div><div class="list" id="recent"></div></section>
 <section id="history" hidden><div class="section-head"><h2>Expense history</h2><button class="primary" id="addHistory">+ Add</button></div><label for="monthFilter">Month</label><select id="monthFilter"></select><div class="section-head"><div class="muted" id="historySummary"></div></div><div class="card" id="historyCategories"></div><div class="list" id="historyList"></div></section>
 <section id="settings" hidden><div class="card"><h2>Monthly spending target</h2><div class="muted">Set a guide for your total spending each month.</div><label for="budgetInput">Target in dollars</label><input id="budgetInput" inputmode="decimal" placeholder="e.g. 1200.00"><div class="actions"><button class="primary" id="saveBudget">Save target</button></div><p class="hint">Enter 0 to turn off the target.</p></div><div class="card"><h2>Your data</h2><p class="muted">The live JSON is in iCloud Drive → Scriptable. The previous version is kept there after each change.</p><div class="actions"><button class="secondary" id="exportCSV">Export CSV</button><button class="secondary" id="exportJSON">Export JSON</button></div><p class="hint">An occasional export gives you a separate backup.</p></div></section>
-</main><div class="overlay" id="overlay"><div class="sheet"><div class="sheet-head"><h2 id="formTitle">New expense</h2><button id="closeForm" aria-label="Close">×</button></div><form id="expenseForm"><div class="two"><div><label for="amountInput">Amount</label><input id="amountInput" inputmode="decimal" placeholder="0.00" required></div><div><label for="dateInput">Date</label><input id="dateInput" type="date" required></div></div><label for="noteInput">Description</label><input id="noteInput" placeholder="What was it for?" maxlength="120"><label for="categoryInput">Category</label><select id="categoryInput"></select><div class="error" id="formError"></div><div class="actions"><button type="button" class="danger" id="deleteExpense" hidden>Delete</button><button type="submit" class="primary">Save expense</button></div></form></div></div><div class="toast" id="toast"></div>
+</main><div class="overlay" id="overlay"><div class="sheet"><div class="sheet-head"><h2 id="formTitle">New expense</h2><button id="closeForm" aria-label="Close">×</button></div><form id="expenseForm"><div class="two"><div><label for="amountInput">Amount</label><input id="amountInput" inputmode="decimal" placeholder="0.00" required></div><div><label for="dateInput">Date</label><input id="dateInput" type="date" required></div></div><label for="noteInput">Description</label><input id="noteInput" placeholder="What was it for?" maxlength="120"><label for="categoryInput">Category</label><select id="categoryInput"></select><div class="error" id="formError"></div><div class="actions"><button type="button" class="danger" id="deleteExpense" hidden>Delete</button><button type="submit" class="primary">Save expense</button></div></form></div></div><div class="confirm-overlay" id="deleteDialog" role="alertdialog" aria-modal="true"><div class="confirm-card"><h2>Delete this expense?</h2><p id="deleteMessage"></p><div class="actions"><button type="button" class="secondary" id="cancelDelete">Cancel</button><button type="button" class="danger" id="confirmDelete">Delete expense</button></div></div></div><div class="toast" id="toast"></div>
 <script>
 const boot=${boot};let expenses=boot.expenses,budget=boot.budget,editing=null,sending=false;
 window.__novaReplyTimer=null;
@@ -131,11 +132,13 @@ function render(){
 
 function openForm(e){editing=e&&e.id!=null?e.id:null;byId('formTitle').textContent=editing!=null?'Edit expense':'New expense';byId('amountInput').value=e?String(e.amount):'';byId('noteInput').value=e?e.note:'';byId('dateInput').value=e?(e.date.length===10?e.date:day(e.date)):today();byId('categoryInput').value=e?e.category:boot.categories[0];byId('deleteExpense').hidden=editing==null;byId('formError').textContent='';byId('overlay').classList.add('open');setTimeout(()=>byId('amountInput').focus(),150)}
 function closeForm(){byId('overlay').classList.remove('open');editing=null}
+function askDelete(){const e=expenses.find(item=>String(item.id)===String(editing));if(!e)return;byId('deleteMessage').textContent=money(e.amount)+' · '+e.note;byId('deleteDialog').classList.add('open')}
+function closeDelete(){byId('deleteDialog').classList.remove('open')}
 function toast(message){const x=byId('toast');x.textContent=message;x.style.display='block';setTimeout(()=>x.style.display='none',3500)}
 boot.categories.forEach(c=>{const o=el('option','',c);o.value=c;byId('categoryInput').append(o)});
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));byId('addTop').onclick=byId('addHistory').onclick=()=>openForm();byId('seeAll').onclick=()=>showTab('history');byId('closeForm').onclick=closeForm;byId('monthFilter').onchange=render;
 byId('expenseForm').onsubmit=e=>{e.preventDefault();byId('formError').textContent='';send({type:'save',id:editing,amount:byId('amountInput').value,note:byId('noteInput').value,category:byId('categoryInput').value,date:byId('dateInput').value})};
-byId('deleteExpense').onclick=()=>{if(confirm('Delete this expense?'))send({type:'delete',id:editing})};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});
+byId('deleteExpense').onclick=askDelete;byId('cancelDelete').onclick=closeDelete;byId('confirmDelete').onclick=()=>{const id=editing;closeDelete();send({type:'delete',id})};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});
 render();if(boot.initialTab!=='overview')showTab(boot.initialTab);if(boot.startAdding){openForm(boot.attempt);if(boot.status)byId('formError').textContent=boot.status}else if(boot.status)toast(boot.status);
 </script></body></html>`;
 }
@@ -211,62 +214,115 @@ async function showApp(state, startAdding) {
   await web.present(false);
 }
 
-function makeWidget(state, error) {
+function widgetText(parent, value, size, color = "#FFFFFF", weight = "regular") {
+  const item = parent.addText(String(value));
+  item.font = weight === "bold" ? Font.boldSystemFont(size) :
+    weight === "semibold" ? Font.semiboldSystemFont(size) :
+    weight === "medium" ? Font.mediumSystemFont(size) : Font.systemFont(size);
+  item.textColor = new Color(color);
+  item.lineLimit = 1;
+  item.minimumScaleFactor = 0.65;
+  return item;
+}
+
+function widgetRow(parent, label, value, labelColor = "#CBD5E1", size = 11) {
+  const row = parent.addStack();
+  row.layoutHorizontally();
+  row.centerAlignContent();
+  widgetText(row, label, size, labelColor);
+  row.addSpacer(6);
+  widgetText(row, value, size, "#FFFFFF", "semibold");
+  return row;
+}
+
+function makeWidget(state, error, family = config.widgetFamily || "medium") {
+  const small = family === "small";
+  const large = family === "large" || family === "extraLarge";
   const widget = new ListWidget();
   widget.backgroundColor = new Color("#111827");
-  widget.setPadding(15, 16, 15, 16);
-  const header = widget.addText("SPENDING TRACKER");
-  header.font = Font.semiboldSystemFont(10);
-  header.textColor = new Color("#94A3B8");
-  widget.addSpacer(8);
-  if (error) {
-    const text = widget.addText("Open tracker to check iCloud data");
-    text.font = Font.mediumSystemFont(13);
-    text.textColor = Color.white();
-    return widget;
-  }
-  const now = new Date(), current = state.expenses.filter(e => monthOf(e.date) === monthOf(now));
-  const spent = current.reduce((n, e) => n + e.amount, 0);
-  const today = current.filter(e => dayOf(e.date) === dayOf(now)).reduce((n, e) => n + e.amount, 0);
-  const monthText = widget.addText(now.toLocaleDateString("en-US", { month: "long", year: "numeric" }));
-  monthText.font = Font.systemFont(11); monthText.textColor = new Color("#94A3B8");
-  const totalText = widget.addText(money(spent));
-  totalText.font = Font.boldSystemFont(27); totalText.textColor = Color.white();
-  totalText.minimumScaleFactor = 0.6; totalText.lineLimit = 1;
-  const row = widget.addStack(); row.layoutHorizontally();
-  const daily = row.addText("Today  " + money(today));
-  daily.font = Font.mediumSystemFont(11); daily.textColor = new Color("#CBD5E1");
-  row.addSpacer();
-  const add = row.addText("Tap to add");
-  add.font = Font.semiboldSystemFont(11); add.textColor = new Color("#60A5FA");
+  widget.setPadding(small ? 13 : 17, small ? 13 : 18, small ? 13 : 17, small ? 13 : 18);
   const baseURL = URLScheme.forRunningScript();
   widget.url = baseURL + (baseURL.includes("?") ? "&" : "?") + "action=add";
+
+  const heading = widget.addStack();
+  heading.layoutHorizontally();
+  widgetText(heading, small ? "SPENDING" : "SPENDING TRACKER", small ? 9 : 10, "#94A3B8", "semibold");
+  heading.addSpacer();
+  if (!small) widgetText(heading, "+ ADD", 10, "#60A5FA", "semibold");
+  widget.addSpacer(large ? 13 : 8);
+
+  if (error) {
+    widgetText(widget, "Open tracker to check iCloud data", 12, "#FFFFFF", "medium").lineLimit = 2;
+    widget.addSpacer();
+    return widget;
+  }
+
+  const now = new Date();
+  const current = state.expenses.filter(e => monthOf(e.date) === monthOf(now));
+  const spent = current.reduce((sum, e) => sum + e.amount, 0);
+  const today = current.filter(e => dayOf(e.date) === dayOf(now))
+    .reduce((sum, e) => sum + e.amount, 0);
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const lastSevenDays = state.expenses.filter(e => {
+    const date = new Date(e.date);
+    return date >= weekStart && date <= now;
+  }).reduce((sum, e) => sum + e.amount, 0);
+  const monthLabel = now.toLocaleDateString("en-US", { month: small ? "short" : "long", year: "numeric" });
+  widgetText(widget, monthLabel, small ? 10 : 12, "#94A3B8");
+  widgetText(widget, money(spent), small ? 27 : large ? 36 : 29, "#FFFFFF", "bold");
+  widget.addSpacer(small ? 6 : 8);
+
+  if (small) {
+    widgetText(widget, "Today " + money(today), 10, "#CBD5E1", "medium");
+  } else {
+    widgetRow(widget, "Today", money(today), "#CBD5E1", large ? 12 : 11);
+    if (large) widgetRow(widget, "Last 7 days", money(lastSevenDays), "#CBD5E1", 12);
+  }
+
   if (state.budget > 0) {
+    widget.addSpacer(5);
+    const remaining = state.budget - spent;
+    const label = money(Math.abs(remaining)) + (remaining >= 0 ? " left of target" : " over target");
+    widgetText(widget, label, small ? 9 : 11, remaining >= 0 ? "#34D399" : "#FB7185", "medium");
+  }
+
+  if (!small) {
+    widget.addSpacer(large ? 17 : 10);
+    widgetText(widget, "TOP CATEGORIES", 9, "#94A3B8", "semibold");
     widget.addSpacer(4);
-    const remaining = widget.addText(spent <= state.budget ?
-      money(state.budget - spent) + " left of target" : money(spent - state.budget) + " over target");
-    remaining.font = Font.mediumSystemFont(10);
-    remaining.textColor = spent <= state.budget ? new Color("#34D399") : new Color("#FB7185");
+    const grouped = {};
+    current.forEach(e => grouped[e.category] = (grouped[e.category] || 0) + e.amount);
+    const categories = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
+    if (!categories.length) widgetText(widget, "No expenses this month", 11, "#CBD5E1");
+    const limit = family === "extraLarge" ? 6 : large ? 3 : 2;
+    for (const [category, value] of categories.slice(0, limit)) {
+      const color = COLORS[CATEGORIES.indexOf(category)] || "#94A3B8";
+      widgetRow(widget, category, money(value), color, large ? 12 : 10);
+      if (large) widget.addSpacer(2);
+    }
   }
-  widget.addSpacer(8);
-  const section = widget.addText("TOP CATEGORIES");
-  section.font = Font.semiboldSystemFont(9); section.textColor = new Color("#94A3B8");
-  const grouped = {}; current.forEach(e => grouped[e.category] = (grouped[e.category] || 0) + e.amount);
-  const categories = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
-  if (!categories.length) {
-    const empty = widget.addText("No expenses yet");
-    empty.font = Font.systemFont(12); empty.textColor = new Color("#CBD5E1");
+
+  if (large) {
+    widget.addSpacer(15);
+    widgetText(widget, "RECENT EXPENSES", 9, "#94A3B8", "semibold");
+    widget.addSpacer(5);
+    const recent = state.expenses.slice().sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, family === "extraLarge" ? 5 : 2);
+    if (!recent.length) widgetText(widget, "Nothing logged yet", 11, "#CBD5E1");
+    for (const entry of recent) {
+      widgetRow(widget, entry.note, money(entry.amount), "#FFFFFF", 12);
+      widgetText(widget, entry.category + " · " + new Date(entry.date).toLocaleDateString("en-US", {
+        month: "short", day: "numeric"
+      }), 9, "#94A3B8");
+      widget.addSpacer(5);
+    }
   }
-  const categoryLimit = config.widgetFamily === "small" ? (state.budget > 0 ? 1 : 2) :
-    (state.budget > 0 ? 2 : 4);
-  for (const [category, value] of categories.slice(0, categoryLimit)) {
-    const r = widget.addStack(); r.layoutHorizontally();
-    const name = r.addText(category); name.font = Font.systemFont(10);
-    name.textColor = new Color(COLORS[CATEGORIES.indexOf(category)] || "#94A3B8");
-    name.lineLimit = 1; name.minimumScaleFactor = 0.7; r.addSpacer(6);
-    const valueText = r.addText(money(value)); valueText.font = Font.mediumSystemFont(10);
-    valueText.textColor = Color.white(); valueText.lineLimit = 1; valueText.minimumScaleFactor = 0.7;
-  }
+
+  widget.addSpacer();
+  widgetText(widget, small ? "Tap to add" : "Tap anywhere to add an expense", small ? 9 : 10,
+    "#60A5FA", "semibold");
   widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
   return widget;
 }
