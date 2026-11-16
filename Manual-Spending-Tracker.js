@@ -72,8 +72,8 @@ function exportCSV(data) {
     .map(e => [dayOf(e.date), Number(e.amount).toFixed(2), e.note, e.category].map(q).join(","))].join("\r\n");
 }
 
-function makeHTML(state, startAdding) {
-  const boot = safeJSON({ ...state, categories: CATEGORIES, colors: COLORS, startAdding });
+function makeHTML(state, startAdding, status = "", initialTab = "overview", attempt = null) {
+  const boot = safeJSON({ ...state, categories: CATEGORIES, colors: COLORS, startAdding, status, initialTab, attempt });
   return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><title>Spending Tracker</title>
 <style>
 :root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#f8fafc;background:#0b1220}*{box-sizing:border-box}body{margin:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}button,input,select{font:inherit}button{cursor:pointer}
@@ -91,9 +91,19 @@ label{display:block;color:#a8b9d0;font-size:13px;font-weight:700;margin:15px 0 7
 <section id="settings" hidden><div class="card"><h2>Monthly spending target</h2><div class="muted">Set a guide for your total spending each month.</div><label for="budgetInput">Target in dollars</label><input id="budgetInput" inputmode="decimal" placeholder="e.g. 1200.00"><div class="actions"><button class="primary" id="saveBudget">Save target</button></div><p class="hint">Enter 0 to turn off the target.</p></div><div class="card"><h2>Your data</h2><p class="muted">The live JSON is in iCloud Drive → Scriptable. The previous version is kept there after each change.</p><div class="actions"><button class="secondary" id="exportCSV">Export CSV</button><button class="secondary" id="exportJSON">Export JSON</button></div><p class="hint">An occasional export gives you a separate backup.</p></div></section>
 </main><div class="overlay" id="overlay"><div class="sheet"><div class="sheet-head"><h2 id="formTitle">New expense</h2><button id="closeForm" aria-label="Close">×</button></div><form id="expenseForm"><div class="two"><div><label for="amountInput">Amount</label><input id="amountInput" inputmode="decimal" placeholder="0.00" required></div><div><label for="dateInput">Date</label><input id="dateInput" type="date" required></div></div><label for="noteInput">Description</label><input id="noteInput" placeholder="What was it for?" maxlength="120"><label for="categoryInput">Category</label><select id="categoryInput"></select><div class="error" id="formError"></div><div class="actions"><button type="button" class="danger" id="deleteExpense" hidden>Delete</button><button type="submit" class="primary">Save expense</button></div></form></div></div><div class="toast" id="toast"></div>
 <script>
-const boot=${boot};let expenses=boot.expenses,budget=boot.budget,editing=null;
-window.__novaQueue=[];window.__novaWake=null;
-function send(action){window.__novaQueue.push(action);if(window.__novaWake)window.__novaWake()}
+const boot=${boot};let expenses=boot.expenses,budget=boot.budget,editing=null,sending=false;
+window.__novaReplyTimer=null;
+function send(action){
+ if(sending)return;
+ sending=true;
+ clearTimeout(window.__novaReplyTimer);
+ window.__novaReplyTimer=setTimeout(()=>{
+  sending=false;
+  byId('formError').textContent='Scriptable did not respond. Close and reopen the tracker.';
+  toast('Scriptable did not respond. Close and reopen the tracker.');
+ },8000);
+ window.location.href='https://scriptable-action.invalid/submit?payload='+encodeURIComponent(JSON.stringify(action));
+}
 const byId=id=>document.getElementById(id);
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n);
 function day(s){const d=new Date(s);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
@@ -118,65 +128,86 @@ function render(){
  byId('budgetInput').value=budget?budget.toFixed(2):'';
 }
 
-function openForm(e){editing=e?e.id:null;byId('formTitle').textContent=e?'Edit expense':'New expense';byId('amountInput').value=e?Number(e.amount).toFixed(2):'';byId('noteInput').value=e?e.note:'';byId('dateInput').value=e?day(e.date):today();byId('categoryInput').value=e?e.category:boot.categories[0];byId('deleteExpense').hidden=!e;byId('formError').textContent='';byId('overlay').classList.add('open');setTimeout(()=>byId('amountInput').focus(),150)}
+function openForm(e){editing=e&&e.id!=null?e.id:null;byId('formTitle').textContent=editing!=null?'Edit expense':'New expense';byId('amountInput').value=e?String(e.amount):'';byId('noteInput').value=e?e.note:'';byId('dateInput').value=e?(e.date.length===10?e.date:day(e.date)):today();byId('categoryInput').value=e?e.category:boot.categories[0];byId('deleteExpense').hidden=editing==null;byId('formError').textContent='';byId('overlay').classList.add('open');setTimeout(()=>byId('amountInput').focus(),150)}
 function closeForm(){byId('overlay').classList.remove('open');editing=null}
 function toast(message){const x=byId('toast');x.textContent=message;x.style.display='block';setTimeout(()=>x.style.display='none',3500)}
-window.nativeResult=function(result){if(result.error){if(byId('overlay').classList.contains('open'))byId('formError').textContent=result.error;else toast(result.error);return}if(result.expenses)expenses=result.expenses;if(typeof result.budget==='number')budget=result.budget;if(result.close)closeForm();render();if(result.message)toast(result.message)};
 boot.categories.forEach(c=>{const o=el('option','',c);o.value=c;byId('categoryInput').append(o)});
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));byId('addTop').onclick=byId('addHistory').onclick=()=>openForm();byId('seeAll').onclick=()=>showTab('history');byId('closeForm').onclick=closeForm;byId('monthFilter').onchange=render;
 byId('expenseForm').onsubmit=e=>{e.preventDefault();byId('formError').textContent='';send({type:'save',id:editing,amount:byId('amountInput').value,note:byId('noteInput').value,category:byId('categoryInput').value,date:byId('dateInput').value})};
 byId('deleteExpense').onclick=()=>{if(confirm('Delete this expense?'))send({type:'delete',id:editing})};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});
-render();if(boot.startAdding)openForm();
+render();if(boot.initialTab!=='overview')showTab(boot.initialTab);if(boot.startAdding){openForm(boot.attempt);if(boot.status)byId('formError').textContent=boot.status}else if(boot.status)toast(boot.status);
 </script></body></html>`;
+}
+
+async function handleAction(state, action) {
+  if (!action || typeof action !== "object") throw new Error("Invalid action.");
+  if (action.type === "save") {
+    const amount = amountFrom(action.amount);
+    if (!CATEGORIES.includes(action.category)) throw new Error("Choose a category.");
+    const note = String(action.note || "").trim().slice(0, 120) || action.category;
+    const index = action.id == null ? -1 : state.expenses.findIndex(e => String(e.id) === String(action.id));
+    if (action.id != null && index < 0) throw new Error("Expense not found. Reopen the tracker.");
+    const previous = index >= 0 ? state.expenses[index] : null;
+    const entry = { id: previous ? previous.id : Date.now() + "-" + Math.random(), amount, note,
+      category: action.category, date: dateFor(action.date, previous && previous.date) };
+    const next = state.expenses.slice();
+    if (index < 0) next.push(entry); else next[index] = entry;
+    await saveExpenses(next);
+    state.expenses = next;
+    return index < 0 ? "Expense saved" : "Expense updated";
+  }
+  if (action.type === "delete") {
+    if (!state.expenses.some(e => String(e.id) === String(action.id))) throw new Error("Expense not found.");
+    const next = state.expenses.filter(e => String(e.id) !== String(action.id));
+    await saveExpenses(next);
+    state.expenses = next;
+    return "Expense deleted";
+  }
+  if (action.type === "budget") {
+    const budget = amountFrom(action.amount, true);
+    saveBudget(budget);
+    state.budget = budget;
+    return "Monthly target saved";
+  }
+  if (action.type === "exportCSV") {
+    await DocumentPicker.exportString(exportCSV(state.expenses), "spending-tracker.csv");
+    return "CSV exported";
+  }
+  if (action.type === "exportJSON") {
+    await DocumentPicker.exportString(JSON.stringify(state.expenses, null, 2), DATA_NAME);
+    return "JSON exported";
+  }
+  throw new Error("Unknown action.");
 }
 
 async function showApp(state, startAdding) {
   const web = new WebView();
+  const prefix = "https://scriptable-action.invalid/submit?payload=";
+  let busy = false;
+  web.shouldAllowRequest = request => {
+    if (!request.url.startsWith(prefix)) return true;
+    if (busy) return false;
+    busy = true;
+    let action;
+    try { action = JSON.parse(decodeURIComponent(request.url.slice(prefix.length))); }
+    catch (_) { action = { type: "invalid" }; }
+    // Defer work until after the WebView cancels the navigation.
+    Promise.resolve().then(async () => {
+      let status, failed = false;
+      try { status = await handleAction(state, action); }
+      catch (error) { failed = true; status = String(error.message || error); }
+      const type = String(action.type || "");
+      const tab = type === "budget" || type.startsWith("export") ? "settings" :
+        type === "delete" ? "history" : "overview";
+      try { await web.loadHTML(makeHTML(state, failed && action.type === "save", status,
+        tab, failed && action.type === "save" ? action : null)); }
+      catch (error) { console.error(error); }
+      busy = false;
+    });
+    return false;
+  };
   await web.loadHTML(makeHTML(state, startAdding));
-  const closed = web.present(false).then(() => ({ closed: true }));
-  const bridge = "if(window.__novaQueue.length){completion(window.__novaQueue.shift())}else{window.__novaWake=function(){window.__novaWake=null;completion(window.__novaQueue.shift())}}";
-  while (true) {
-    let event;
-    try { event = await Promise.race([closed, web.evaluateJavaScript(bridge, true).then(value => ({ value }))]); }
-    catch (_) { break; }
-    if (event.closed) break;
-    const action = event.value;
-    if (!action || typeof action !== "object") continue;
-    let result = {};
-    try {
-      if (action.type === "save") {
-        const amount = amountFrom(action.amount);
-        if (!CATEGORIES.includes(action.category)) throw new Error("Choose a category.");
-        const note = String(action.note || "").trim().slice(0, 120) || action.category;
-        const index = action.id == null ? -1 : state.expenses.findIndex(e => String(e.id) === String(action.id));
-        if (action.id != null && index < 0) throw new Error("Expense not found. Reopen the tracker.");
-        const previous = index >= 0 ? state.expenses[index] : null;
-        const entry = { id: previous ? previous.id : Date.now() + "-" + Math.random(), amount, note,
-          category: action.category, date: dateFor(action.date, previous && previous.date) };
-        const next = state.expenses.slice();
-        if (index < 0) next.push(entry); else next[index] = entry;
-        await saveExpenses(next); state.expenses = next;
-        result = { expenses: next, close: true, message: index < 0 ? "Expense saved" : "Expense updated" };
-      } else if (action.type === "delete") {
-        if (!state.expenses.some(e => String(e.id) === String(action.id))) throw new Error("Expense not found.");
-        const next = state.expenses.filter(e => String(e.id) !== String(action.id));
-        await saveExpenses(next); state.expenses = next;
-        result = { expenses: next, close: true, message: "Expense deleted" };
-      } else if (action.type === "budget") {
-        const budget = amountFrom(action.amount, true);
-        saveBudget(budget); state.budget = budget;
-        result = { budget, message: "Monthly target saved" };
-      } else if (action.type === "exportCSV") {
-        await DocumentPicker.exportString(exportCSV(state.expenses), "spending-tracker.csv");
-        result = { message: "CSV exported" };
-      } else if (action.type === "exportJSON") {
-        await DocumentPicker.exportString(JSON.stringify(state.expenses, null, 2), DATA_NAME);
-        result = { message: "JSON exported" };
-      }
-    } catch (error) { result = { error: String(error.message || error) }; }
-    try { await web.evaluateJavaScript("window.nativeResult(" + safeJSON(result) + ")", false); }
-    catch (_) { break; }
-  }
+  await web.present(false);
 }
 
 function makeWidget(state, error) {
