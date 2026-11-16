@@ -10,6 +10,7 @@ const library = source.split('\nif (config.runsInWidget)')[0];
 function setup() {
   const files = { local: new Map(), cloud: new Map() };
   const views = [];
+  const exports = [];
   function fileManager(kind) {
     const map = files[kind];
     return {
@@ -36,12 +37,12 @@ function setup() {
   const context = {
     FileManager: { local: () => fileManager('local'), iCloud: () => fileManager('cloud') },
     WebView,
-    DocumentPicker: { exportString: async () => {} },
+    DocumentPicker: { exportString: async (body, name) => { exports.push({ body, name }); } },
     console
   };
   vm.createContext(context);
   vm.runInContext(library, context);
-  return { context, files, views };
+  return { context, files, views, exports };
 }
 
 async function waitFor(check) {
@@ -80,6 +81,11 @@ test('WebView actions save expenses and budgets and reject invalid amounts', asy
   await send({ type: 'budget', amount: '1200.00' }, 'Monthly target saved');
   assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).monthlyBudget, 1200);
 
+  await send({ type: 'subscriptionSave', id: null, name: 'Music', amount: '9.99',
+    cadence: 'monthly', nextDate: '2026-12-15' }, 'Subscription added');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json'))[0].name, 'Music');
+  assert.match(web.loads.at(-1), /"initialTab":"subscriptions"/);
+
   await send({ type: 'save', id: null, amount: 'bad', note: 'Nope',
     category: 'Food & Drinks', date: '2026-11-15' }, 'Enter dollars');
   assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 2);
@@ -90,6 +96,62 @@ test('WebView actions save expenses and budgets and reject invalid amounts', asy
 
   web.dismiss();
   await running;
+});
+
+test('confirmed subscriptions save separately, preserve backups, and export with the target', async () => {
+  const { context, files, exports } = setup();
+  const expense = { id: 'old', amount: 21.27, note: 'ChatGPT', category: 'Subscriptions',
+    date: '2026-11-13T12:00:00.000Z' };
+  files.cloud.set('cloud/spending-tracker.json', JSON.stringify([expense]));
+  files.cloud.set('cloud/spending-tracker-settings.json', JSON.stringify({ monthlyBudget: 2000 }));
+  context.state = { expenses: [expense], budget: 2000, subscriptions: [] };
+  async function act(action) {
+    context.action = action;
+    return vm.runInContext('handleAction(state, action)', context);
+  }
+  assert.equal(await act({ type: 'subscriptionSave', id: null, name: 'ChatGPT', amount: '21.27',
+    cadence: 'monthly', nextDate: '2026-12-13' }), 'Subscription added');
+  const first = JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json'));
+  assert.equal(first[0].name, 'ChatGPT');
+  assert.equal(first[0].active, true);
+  assert.equal(files.cloud.get('cloud/spending-tracker.json'), JSON.stringify([expense]));
+
+  await assert.rejects(act({ type: 'subscriptionSave', id: null, name: 'chatgpt', amount: '21.27',
+    cadence: 'monthly', nextDate: '2026-12-13' }), /already tracked/);
+  await assert.rejects(act({ type: 'subscriptionSave', id: null, name: 'Invalid', amount: '5',
+    cadence: 'monthly', nextDate: '2026-02-31' }), /valid date/);
+  await assert.rejects(act({ type: 'subscriptionSave', id: null, name: 'Invalid', amount: '5',
+    cadence: 'fortnightly', nextDate: '2026-12-14' }), /how often/);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json')).length, 1);
+
+  const id = first[0].id;
+  assert.equal(await act({ type: 'subscriptionSave', id, name: 'ChatGPT Plus', amount: '22.00',
+    cadence: 'monthly', nextDate: '2026-12-14' }), 'Subscription updated');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions-backup.json'))[0].name, 'ChatGPT');
+  assert.equal(await act({ type: 'subscriptionToggle', id }), 'Subscription paused');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json'))[0].active, false);
+  await act({ type: 'subscriptionSave', id, name: 'ChatGPT Plus', amount: '23.00',
+    cadence: 'monthly', nextDate: '2027-01-14' });
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json'))[0].active, false);
+  await act({ type: 'exportBackup' });
+  assert.equal(exports.at(-1).name, 'NOVA-complete-backup.json');
+  const backup = JSON.parse(exports.at(-1).body);
+  assert.equal(backup.monthlyBudget, 2000);
+  assert.equal(backup.expenses[0].note, 'ChatGPT');
+  assert.equal(backup.subscriptions[0].name, 'ChatGPT Plus');
+  assert.equal(backup.subscriptions[0].active, false);
+  assert.equal(await act({ type: 'subscriptionRemove', id }), 'Subscription removed');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-subscriptions.json')).length, 0);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 1);
+  const loaded = await vm.runInContext('loadState()', context);
+  assert.equal(loaded.budget, 2000);
+  assert.equal(loaded.subscriptions.length, 0);
+  files.cloud.set('cloud/spending-tracker-subscriptions.json', '{"broken":true}');
+  await assert.rejects(act({ type: 'subscriptionSave', id: null, name: 'Music', amount: '5',
+    cadence: 'monthly', nextDate: '2026-12-14' }), /subscriptions JSON is invalid/);
+  assert.equal(files.cloud.get('cloud/spending-tracker-subscriptions.json'), '{"broken":true}');
+  await assert.rejects(vm.runInContext('loadState()', context), /subscriptions JSON is invalid/);
+  assert.equal((await vm.runInContext('loadState(false)', context)).expenses.length, 1);
 });
 
 test('embedded WebView JavaScript parses', () => {
@@ -137,7 +199,7 @@ function renderPage(state) {
     return elements.get(id);
   };
   get('progress').firstElementChild = new Element();
-  const nav = ['overview', 'history', 'settings'].map(tab => {
+  const nav = ['overview', 'history', 'subscriptions', 'settings'].map(tab => {
     const button = new Element(); button.dataset = { tab }; return button;
   });
   const page = {
@@ -179,6 +241,54 @@ test('quick entry sends the selected category and date', () => {
   assert.equal(payload.amount, '14.50');
   assert.equal(payload.category, 'Health');
   assert.equal(payload.date, '2026-11-14');
+});
+
+test('subscription suggestions require confirmation and the list can pause or remove entries', () => {
+  const expense = { id: 'old', amount: 21.27, note: 'ChatGPT', category: 'Subscriptions',
+    date: new Date().toISOString() };
+  const suggestion = renderPage({ expenses: [expense], budget: 2000, subscriptions: [] });
+  assert.equal(suggestion.get('subPreviewTotal').textContent, 'Set up your list');
+  assert.equal(suggestion.get('subSuggestionsSection').hidden, false);
+  suggestion.get('seeSubs').onclick();
+  assert.equal(suggestion.get('subscriptions').hidden, false);
+  suggestion.get('subSuggestions').children[0].onclick();
+  assert.equal(suggestion.get('subName').value, 'ChatGPT');
+  assert.equal(suggestion.get('subAmount').value, '21.27');
+  assert.equal(suggestion.get('subCadence').value, '');
+  assert.equal(suggestion.get('subNextDate').value, '');
+  suggestion.get('subCadence').value = 'monthly';
+  suggestion.get('subNextDate').value = '2026-12-13';
+  suggestion.get('subForm').onsubmit({ preventDefault() {} });
+  const save = JSON.parse(decodeURIComponent(suggestion.page.window.location.href.split('payload=')[1]));
+  assert.equal(save.type, 'subscriptionSave');
+  assert.equal(save.name, 'ChatGPT');
+  assert.equal(save.nextDate, '2026-12-13');
+
+  const item = { id: 'sub1', name: 'ChatGPT', amount: 21.27, cadence: 'monthly',
+    nextDate: '2026-12-13', active: true };
+  const paused = renderPage({ expenses: [expense], budget: 2000, subscriptions: [item] });
+  assert.equal(paused.get('subPreviewTotal').textContent, '$21.27/mo');
+  assert.equal(paused.get('subSuggestionsSection').hidden, true);
+  paused.get('subList').children[0].onclick();
+  paused.get('subToggle').onclick();
+  const toggle = JSON.parse(decodeURIComponent(paused.page.window.location.href.split('payload=')[1]));
+  assert.equal(toggle.type, 'subscriptionToggle');
+  assert.equal(toggle.id, 'sub1');
+
+  const equivalents = renderPage({ expenses: [], budget: 0, subscriptions: [
+    { id: 'year', name: 'Yearly', amount: 120, cadence: 'yearly', nextDate: '2027-11-14', active: true },
+    { id: 'week', name: 'Weekly', amount: 12, cadence: 'weekly', nextDate: '2026-11-20', active: true }
+  ] });
+  assert.equal(equivalents.get('subPreviewTotal').textContent, '$62.00/mo');
+
+  const removal = renderPage({ expenses: [expense], budget: 2000, subscriptions: [item] });
+  removal.get('subList').children[0].onclick();
+  removal.get('removeSub').onclick();
+  assert.match(removal.get('deleteMessage').textContent, /Logged expenses stay/);
+  removal.get('confirmDelete').onclick();
+  const remove = JSON.parse(decodeURIComponent(removal.page.window.location.href.split('payload=')[1]));
+  assert.equal(remove.type, 'subscriptionRemove');
+  assert.equal(remove.id, 'sub1');
 });
 
 test('delete button opens in-page confirmation and submits the selected expense', () => {
@@ -246,7 +356,9 @@ test('widget families show progressively more detail', () => {
   assert.ok(!small.texts.includes('TOP CATEGORIES'));
   assert.ok(medium.texts.includes('TOP CATEGORIES'));
   assert.ok(!medium.texts.includes('RECENT EXPENSES'));
-  assert.equal(medium.images.length, 1);
+  assert.equal(medium.images.length, 0);
+  assert.ok(medium.texts.includes('Latest · Lunch'));
+  assert.ok(medium.texts.some(text => text.startsWith('Updated ')));
   assert.ok(medium.widget.children.some(child => child.children?.some(grandchild =>
     grandchild.children?.some(item => item.text === 'TOP CATEGORIES'))));
   assert.ok(large.texts.includes('RECENT EXPENSES'));
@@ -256,6 +368,10 @@ test('widget families show progressively more detail', () => {
   assert.equal(large.images[1].labels.length, 7);
   assert.equal(large.images[1].rects.length, 7);
   assert.equal(large.images[1].rects.at(-1).height, 34);
+
+  context.state = { expenses: [{ id: 'large', amount: 1973.88, note: 'Rent',
+    category: 'Bills', date: new Date().toISOString() }], budget: 2000, subscriptions: [] };
+  assert.ok(render('medium').texts.includes('$1,973.88'));
 
   context.state = { expenses: [], budget: 0 };
   const empty = render('large');
