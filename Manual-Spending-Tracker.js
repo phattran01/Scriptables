@@ -8,7 +8,7 @@ const legacyPath = localFM.joinPath(localFM.documentsDirectory(), DATA_NAME);
 function paths() {
   const fm = FileManager.iCloud(), dir = fm.documentsDirectory();
   return { fm, data: fm.joinPath(dir, DATA_NAME), backup: fm.joinPath(dir, "spending-tracker-backup.json"),
-    temp: fm.joinPath(dir, "spending-tracker-writing.json"), settings: fm.joinPath(dir, "spending-tracker-settings.json") };
+    settings: fm.joinPath(dir, "spending-tracker-settings.json") };
 }
 function checkData(raw) {
   const data = JSON.parse(raw);
@@ -41,8 +41,9 @@ async function saveExpenses(data) {
     checkData(previous);
     p.fm.writeString(p.backup, previous);
   }
-  p.fm.writeString(p.temp, JSON.stringify(data, null, 2));
-  p.fm.move(p.temp, p.data);
+  // Scriptable's iCloud manager can refuse move() when the destination exists.
+  // writeString() explicitly supports overwriting; the prior JSON is backed up above.
+  p.fm.writeString(p.data, JSON.stringify(data, null, 2));
 }
 function saveBudget(budget) { const p = paths(); p.fm.writeString(p.settings, JSON.stringify({ monthlyBudget: budget }, null, 2)); }
 function amountFrom(value, zeroOK = false) {

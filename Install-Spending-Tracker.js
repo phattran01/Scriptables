@@ -20,7 +20,6 @@ try {
   const directory = fm.documentsDirectory();
   const target = fm.joinPath(directory, SCRIPT_NAME);
   const backup = fm.joinPath(directory, BACKUP_NAME);
-  const temporary = fm.joinPath(directory, "Manual-Spending-Tracker-installing.txt");
 
   let previous = null;
   if (fm.fileExists(target)) {
@@ -32,9 +31,8 @@ try {
     title = "Already up to date";
     message = "Manual-Spending-Tracker already matches GitHub.";
   } else {
-    fm.writeString(temporary, code);
     if (previous !== null) fm.writeString(backup, previous);
-    fm.move(temporary, target);
+    fm.writeString(target, code);
     if (previous === null) title = "Tracker installed";
     message = previous === null
       ? "Manual-Spending-Tracker was installed. Select it in your widget."

@@ -22,7 +22,10 @@ function setup(responseCode = tracker, statusCode = 200) {
     downloadFileFromiCloud: async () => {},
     readString: file => files.get(file),
     writeString: (file, content) => files.set(file, content),
-    move: (from, to) => { files.set(to, files.get(from)); files.delete(from); }
+    move: (from, to) => {
+      if (files.has(to)) throw new Error('Destination already exists');
+      files.set(to, files.get(from)); files.delete(from);
+    }
   };
   class Alert {
     addAction() {}

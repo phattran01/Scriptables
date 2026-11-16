@@ -22,7 +22,10 @@ function setup() {
       },
       writeString: (file, text) => map.set(file, text),
       downloadFileFromiCloud: async () => {},
-      move: (from, to) => { map.set(to, map.get(from)); map.delete(from); }
+      move: (from, to) => {
+        if (map.has(to)) throw new Error('Destination already exists');
+        map.set(to, map.get(from)); map.delete(from);
+      }
     };
   }
   class WebView {
@@ -51,7 +54,10 @@ async function waitFor(check) {
 
 test('WebView actions save expenses and budgets and reject invalid amounts', async () => {
   const { context, files, views } = setup();
-  context.state = { expenses: [], budget: 0 };
+  const existing = { id: 'existing', amount: 25.12, note: 'panda',
+    category: 'Food & Drinks', date: '2026-11-15T12:00:00.000Z' };
+  files.cloud.set('cloud/spending-tracker.json', JSON.stringify([existing]));
+  context.state = { expenses: [existing], budget: 0 };
   const running = vm.runInContext('showApp(state, false)', context);
   await waitFor(() => views[0]?.loads.length === 1);
   const web = views[0];
@@ -68,14 +74,15 @@ test('WebView actions save expenses and budgets and reject invalid amounts', asy
 
   await send({ type: 'save', id: null, amount: '14.50', note: 'Lunch',
     category: 'Food & Drinks', date: '2026-11-15' }, 'Expense saved');
-  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json'))[0].amount, 14.5);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json'))[1].amount, 14.5);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-backup.json')).length, 1);
 
   await send({ type: 'budget', amount: '1200.00' }, 'Monthly target saved');
   assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).monthlyBudget, 1200);
 
   await send({ type: 'save', id: null, amount: 'bad', note: 'Nope',
     category: 'Food & Drinks', date: '2026-11-15' }, 'Enter dollars');
-  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 1);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker.json')).length, 2);
 
   web.dismiss();
   await running;
