@@ -80,6 +80,12 @@ test('WebView actions save expenses and budgets and reject invalid amounts', asy
 
   await send({ type: 'budget', amount: '1200.00' }, 'Monthly target saved');
   assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).monthlyBudget, 1200);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).paydayAnchor, '2026-11-25');
+
+  await send({ type: 'payday', date: '2026-11-25' }, 'Payday saved');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).monthlyBudget, 1200);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).paydayAnchor, '2026-11-25');
+  assert.match(web.loads.at(-1), /"initialTab":"settings"/);
 
   await send({ type: 'subscriptionSave', id: null, name: 'Music', amount: '9.99',
     cadence: 'monthly', nextDate: '2026-12-15' }, 'Subscription added');
@@ -137,6 +143,7 @@ test('confirmed subscriptions save separately, preserve backups, and export with
   assert.equal(exports.at(-1).name, 'NOVA-complete-backup.json');
   const backup = JSON.parse(exports.at(-1).body);
   assert.equal(backup.monthlyBudget, 2000);
+  assert.equal(backup.paydayAnchor, '2026-11-25');
   assert.equal(backup.expenses[0].note, 'ChatGPT');
   assert.equal(backup.subscriptions[0].name, 'ChatGPT Plus');
   assert.equal(backup.subscriptions[0].active, false);
@@ -165,6 +172,38 @@ test('embedded WebView JavaScript parses', () => {
   assert.match(html, /class="amount-entry"/);
   assert.match(html, /id="categoryChips"/);
   assert.match(html, /id="dateDetails" hidden/);
+  assert.match(html, /id="paydayInput" type="date"/);
+});
+
+test('biweekly payday counts by calendar days and settings preserve the target', async () => {
+  const { context, files } = setup();
+  context.state = { expenses: [], budget: 2000, paydayAnchor: '2026-11-25', subscriptions: [] };
+  const details = date => {
+    context.now = new Date(date);
+    return vm.runInContext('nextPayday("2026-11-25", now)', context);
+  };
+  assert.equal(details('2026-11-16T12:00:00').daysUntil, 9);
+  assert.equal(details('2026-11-25T12:00:00').daysUntil, 0);
+  assert.equal(details('2026-11-26T12:00:00').date, '2026-12-09');
+  assert.equal(details('2026-11-26T12:00:00').daysUntil, 13);
+  assert.equal(details('2027-01-01T12:00:00').date, '2027-01-06');
+  assert.equal(details('2027-01-01T12:00:00').daysUntil, 5);
+  context.anchor = '2026-03-01';
+  context.now = new Date('2026-03-16T12:00:00');
+  assert.equal(vm.runInContext('nextPayday(anchor, now).daysUntil', context), 13);
+
+  context.action = { type: 'payday', date: '2026-12-09' };
+  assert.equal(await vm.runInContext('handleAction(state, action)', context), 'Payday saved');
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).monthlyBudget, 2000);
+  context.action = { type: 'budget', amount: '1800' };
+  await vm.runInContext('handleAction(state, action)', context);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).paydayAnchor, '2026-12-09');
+  context.action = { type: 'payday', date: '2026-02-31' };
+  await assert.rejects(vm.runInContext('handleAction(state, action)', context), /valid date/);
+  assert.equal(JSON.parse(files.cloud.get('cloud/spending-tracker-settings.json')).paydayAnchor, '2026-12-09');
+  const loaded = await vm.runInContext('loadState(false)', context);
+  assert.equal(loaded.budget, 1800);
+  assert.equal(loaded.paydayAnchor, '2026-12-09');
 });
 
 function renderPage(state) {
@@ -363,7 +402,9 @@ test('widget families show progressively more detail', () => {
     grandchild.children?.some(item => item.text === 'TOP CATEGORIES'))));
   assert.ok(large.texts.includes('RECENT EXPENSES'));
   assert.ok(large.texts.includes('LAST 7 DAYS'));
+  assert.ok(large.texts.includes('NEXT PAYDAY'));
   assert.ok(large.texts.includes('Lunch'));
+  assert.match(large.widget.children.find(child => child.url?.includes('action=payday')).url, /action=payday$/);
   assert.equal(large.images.length, 2);
   assert.equal(large.images[1].labels.length, 7);
   assert.equal(large.images[1].rects.length, 7);

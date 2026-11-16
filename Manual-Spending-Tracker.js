@@ -4,6 +4,7 @@ const COLORS = ["#60A5FA", "#A78BFA", "#34D399", "#FBBF24", "#FB7185", "#22D3EE"
 const DATA_NAME = "spending-tracker.json";
 const SUBSCRIPTIONS_NAME = "spending-tracker-subscriptions.json";
 const CADENCES = ["weekly", "monthly", "yearly"];
+const DEFAULT_PAYDAY_ANCHOR = "2026-11-25";
 const localFM = FileManager.local();
 const legacyPath = localFM.joinPath(localFM.documentsDirectory(), DATA_NAME);
 
@@ -43,14 +44,15 @@ async function loadState(includeSubscriptions = true) {
     expenses = checkData(localFM.readString(legacyPath));
     p.fm.writeString(p.data, JSON.stringify(expenses, null, 2)); // Keep the local original.
   }
-  let budget = 0;
+  let budget = 0, paydayAnchor = DEFAULT_PAYDAY_ANCHOR;
   if (p.fm.fileExists(p.settings)) {
     const settings = JSON.parse(await readFile(p.fm, p.settings));
     if (Number.isFinite(settings.monthlyBudget) && settings.monthlyBudget >= 0) budget = settings.monthlyBudget;
+    if (settings.paydayAnchor != null) paydayAnchor = dayOf(dateFor(settings.paydayAnchor));
   }
   const subscriptions = includeSubscriptions && p.fm.fileExists(p.subscriptions) ?
     checkSubscriptions(await readFile(p.fm, p.subscriptions)) : [];
-  return { expenses, budget, subscriptions };
+  return { expenses, budget, subscriptions, paydayAnchor };
 }
 async function saveExpenses(data) {
   const p = paths();
@@ -63,7 +65,11 @@ async function saveExpenses(data) {
   // writeString() explicitly supports overwriting; the prior JSON is backed up above.
   p.fm.writeString(p.data, JSON.stringify(data, null, 2));
 }
-function saveBudget(budget) { const p = paths(); p.fm.writeString(p.settings, JSON.stringify({ monthlyBudget: budget }, null, 2)); }
+function saveSettings(state) {
+  const p = paths();
+  p.fm.writeString(p.settings, JSON.stringify({ monthlyBudget: state.budget,
+    paydayAnchor: state.paydayAnchor }, null, 2));
+}
 async function saveSubscriptions(items) {
   const p = paths();
   if (p.fm.fileExists(p.subscriptions)) {
@@ -90,6 +96,15 @@ function dateFor(day, previous) {
   if (!Number.isFinite(d.getTime()) || dayOf(d) !== day) throw new Error("Choose a valid date.");
   if (previous && dayOf(previous) === day) return previous;
   return (!previous && day === dayOf(new Date()) ? new Date() : d).toISOString();
+}
+function nextPayday(anchor, now = new Date()) {
+  const parts = anchor.split("-").map(Number);
+  const anchorDay = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const cycles = Math.max(0, Math.ceil((today - anchorDay) / (14 * dayMs)));
+  const next = anchorDay + cycles * 14 * dayMs;
+  return { date: new Date(next).toISOString().slice(0, 10), daysUntil: Math.round((next - today) / dayMs) };
 }
 const monthOf = value => dayOf(value).slice(0, 7);
 const money = value => {
@@ -125,10 +140,10 @@ main{padding-top:16px}h1{font-size:28px}.nav{margin:16px 0 18px;gap:5px}.nav but
 <section id="overview"><div class="card hero"><div class="eyebrow" id="heroMonth"></div><div class="amount" id="heroAmount"></div><div class="muted" id="budgetLine"></div><div class="progress" id="progress" hidden><span></span></div><div class="stats"><div class="stat"><div class="muted">Today</div><strong id="todayAmount"></strong></div><div class="stat"><div class="muted">Transactions</div><strong id="count"></strong></div></div></div><button class="card summary-mini sub-preview" id="seeSubs"><span><span class="eyebrow">SUBSCRIPTIONS</span><strong id="subPreviewTotal"></strong></span><span class="muted" id="subPreviewCount"></span></button><div class="section-head"><h2>Top categories</h2></div><div class="card" id="categories"></div><div class="section-head"><h2>Recent expenses</h2><button class="secondary" id="seeAll">See all</button></div><div class="list" id="recent"></div></section>
 <section id="history" hidden><div class="section-head"><h2>Expense history</h2><button class="primary" id="addHistory">+ Add</button></div><label for="monthFilter">Month</label><select id="monthFilter"></select><div class="section-head"><div class="muted" id="historySummary"></div></div><div class="card" id="historyCategories"></div><div class="list" id="historyList"></div></section>
 <section id="subscriptions" hidden><div class="section-head"><h2>Subscriptions</h2><button class="primary" id="addSubscription">+ Add</button></div><div class="card hero"><div class="eyebrow">ACTIVE COMMITMENTS</div><div class="amount small-amount" id="subMonthlyTotal"></div><div class="muted" id="subCount"></div><p class="hint">Monthly equivalent for planning. Charges enter your spending total only when logged as expenses.</p></div><div class="list" id="subList"></div><div id="subSuggestionsSection" hidden><div class="section-head"><h2>From your history</h2></div><p class="hint sub-hint">Possible subscriptions from logged expenses. Confirm the billing cycle and next renewal before tracking.</p><div class="list" id="subSuggestions"></div></div></section>
-<section id="settings" hidden><div class="card"><h2>Monthly spending target</h2><div class="muted">Set a guide for your total spending each month.</div><label for="budgetInput">Target in dollars</label><input id="budgetInput" inputmode="decimal" placeholder="e.g. 1200.00"><div class="actions"><button class="primary" id="saveBudget">Save target</button></div><p class="hint">Enter 0 to turn off the target.</p></div><div class="card"><h2>Your data</h2><p class="muted">Expenses, target, and subscriptions live in iCloud Drive → Scriptable. Changes to expenses and subscriptions keep the prior JSON as a backup.</p><div class="actions"><button class="secondary" id="exportCSV">Expenses CSV</button><button class="secondary" id="exportJSON">Expenses JSON</button></div><div class="actions"><button class="secondary" id="exportBackup">Export complete backup</button></div><p class="hint">The complete backup includes expenses, subscriptions, and your target.</p></div></section>
+<section id="settings" hidden><div class="card"><h2>Monthly spending target</h2><div class="muted">Set a guide for your total spending each month.</div><label for="budgetInput">Target in dollars</label><input id="budgetInput" inputmode="decimal" placeholder="e.g. 1200.00"><div class="actions"><button class="primary" id="saveBudget">Save target</button></div><p class="hint">Enter 0 to turn off the target.</p></div><div class="card"><h2>Payday</h2><div class="muted">Every two weeks. NOVA counts forward from one payday you choose.</div><label for="paydayInput">A payday date</label><input id="paydayInput" type="date"><div class="actions"><button class="primary" id="savePayday">Save payday</button></div><p class="hint" id="paydayPreview"></p></div><div class="card"><h2>Your data</h2><p class="muted">Expenses, target, payday, and subscriptions live in iCloud Drive → Scriptable. Changes to expenses and subscriptions keep the prior JSON as a backup.</p><div class="actions"><button class="secondary" id="exportCSV">Expenses CSV</button><button class="secondary" id="exportJSON">Expenses JSON</button></div><div class="actions"><button class="secondary" id="exportBackup">Export complete backup</button></div><p class="hint">The complete backup includes expenses, subscriptions, your target, and payday.</p></div></section>
 </main><div class="overlay" id="overlay"><div class="sheet"><div class="sheet-head"><h2 id="formTitle">New expense</h2><button id="closeForm" aria-label="Close">×</button></div><form id="expenseForm"><label class="form-label" for="amountInput">Amount</label><div class="amount-entry"><span>$</span><input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00" required></div><div class="form-label">Category</div><div class="category-strip" id="categoryChips" role="group" aria-label="Category"></div><input id="categoryInput" type="hidden"><label class="form-label" for="noteInput">Description <small>optional</small></label><input class="quick-note" id="noteInput" placeholder="What was it for?" maxlength="120"><button type="button" class="date-toggle" id="dateToggle">Today · Change date</button><div class="date-details" id="dateDetails" hidden><label for="dateInput">Expense date</label><input id="dateInput" type="date" required></div><div class="error" id="formError"></div><div class="form-footer"><button type="button" class="danger" id="deleteExpense" hidden>Delete</button><button type="submit" class="primary" id="saveExpense">Save expense</button></div></form></div></div><div class="overlay" id="subOverlay"><div class="sheet"><div class="sheet-head"><h2 id="subFormTitle">Track subscription</h2><button id="closeSubForm" aria-label="Close">×</button></div><form id="subForm"><label class="form-label" for="subName">Name</label><input id="subName" maxlength="120" placeholder="e.g. Music or iCloud+" required><div class="two"><div><label class="form-label" for="subAmount">Charge</label><input id="subAmount" inputmode="decimal" placeholder="0.00" required></div><div><label class="form-label" for="subCadence">Billed</label><select id="subCadence" required><option value="">Choose</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="weekly">Weekly</option></select></div></div><label class="form-label" for="subNextDate">Next renewal</label><input id="subNextDate" type="date" required><div class="error" id="subError"></div><div class="form-footer"><button type="button" class="secondary" id="subToggle" hidden>Pause</button><button type="submit" class="primary" id="saveSub">Save subscription</button></div><button type="button" class="secondary sub-remove" id="removeSub" hidden>Remove subscription</button></form></div></div><div class="confirm-overlay" id="deleteDialog" role="alertdialog" aria-modal="true"><div class="confirm-card"><h2 id="deleteTitle">Delete this expense?</h2><p id="deleteMessage"></p><div class="actions"><button type="button" class="secondary" id="cancelDelete">Cancel</button><button type="button" class="danger" id="confirmDelete">Delete expense</button></div></div></div><div class="toast" id="toast"></div>
 <script>
-const boot=${boot};let expenses=boot.expenses,budget=boot.budget,subscriptions=boot.subscriptions,editing=null,editingSub=null,deletingType='delete',sending=false;
+const boot=${boot};let expenses=boot.expenses,budget=boot.budget,paydayAnchor=boot.paydayAnchor||'2026-11-25',subscriptions=boot.subscriptions,editing=null,editingSub=null,deletingType='delete',sending=false;
 window.__novaReplyTimer=null;
 function send(action){
  if(sending)return;
@@ -150,6 +165,7 @@ const monthLabel=k=>new Date(k+'-01T12:00:00').toLocaleDateString('en-US',{month
 const total=list=>list.reduce((n,e)=>n+Math.round(e.amount*100),0)/100;
 const sorted=list=>list.slice().sort((a,b)=>b.date.localeCompare(a.date));
 const monthlyEquivalent=s=>s.amount*(s.cadence==='weekly'?52/12:s.cadence==='yearly'?1/12:1);
+function paydayDetails(anchor){const [y,m,d]=anchor.split('-').map(Number),start=Date.UTC(y,m-1,d),now=new Date(),today=Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()),dayMs=86400000,cycles=Math.max(0,Math.ceil((today-start)/(14*dayMs))),next=start+cycles*14*dayMs;return {date:new Date(next).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',timeZone:'UTC'}),days:Math.round((next-today)/dayMs)}}
 function el(tag,cls,text){const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x}
 function showTab(name){for(const id of ['overview','history','subscriptions','settings'])byId(id).hidden=id!==name;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));render()}
 function expenseRow(e){const b=el('button','expense');b.type='button';const left=el('span');left.append(el('span','note',e.note||e.category),el('small','',e.category+' · '+new Date(e.date).toLocaleDateString()));b.append(left,el('b','',money(e.amount)));b.onclick=()=>openForm(e);return b}
@@ -190,6 +206,8 @@ function render(){
  const months=Array.from(new Set([key,...expenses.map(e=>month(e.date))])).sort().reverse(),select=byId('monthFilter'),old=select.value;select.replaceChildren();for(const m of months){const o=el('option','',monthLabel(m));o.value=m;select.append(o)}select.value=months.includes(old)?old:key;
  const list=sorted(expenses.filter(e=>month(e.date)===select.value));byId('historySummary').textContent=list.length+' expenses · '+money(total(list));const summary=byId('historyCategories');summary.replaceChildren();const sums={};list.forEach(e=>sums[e.category]=(sums[e.category]||0)+e.amount);for(const [cat,value] of Object.entries(sums).sort((a,b)=>b[1]-a[1])){const row=el('div','cat');row.append(el('span','',cat),el('strong','',money(value)));summary.append(row)}summary.hidden=!list.length;const history=byId('historyList');history.replaceChildren();if(!list.length)history.append(el('div','empty','No expenses for this month.'));else list.forEach(e=>history.append(expenseRow(e)));
  byId('budgetInput').value=budget?budget.toFixed(2):'';
+ byId('paydayInput').value=paydayAnchor;
+ const payday=paydayDetails(paydayAnchor);byId('paydayPreview').textContent='Next payday: '+payday.date+' · '+(payday.days===0?'Today':payday.days+' day'+(payday.days===1?'':'s')+' away');
  renderSubscriptions();
 }
 
@@ -213,7 +231,7 @@ byId('dateToggle').onclick=()=>{byId('dateDetails').hidden=!byId('dateDetails').
 byId('expenseForm').onsubmit=e=>{e.preventDefault();byId('formError').textContent='';send({type:'save',id:editing,amount:byId('amountInput').value,note:byId('noteInput').value,category:byId('categoryInput').value,date:byId('dateInput').value})};
 byId('subForm').onsubmit=e=>{e.preventDefault();byId('subError').textContent='';send({type:'subscriptionSave',id:editingSub,name:byId('subName').value,amount:byId('subAmount').value,cadence:byId('subCadence').value,nextDate:byId('subNextDate').value})};
 byId('subToggle').onclick=()=>send({type:'subscriptionToggle',id:editingSub});byId('removeSub').onclick=askSubRemove;
-byId('deleteExpense').onclick=askDelete;byId('cancelDelete').onclick=closeDelete;byId('confirmDelete').onclick=()=>{const action={type:deletingType,id:deletingType==='delete'?editing:editingSub};closeDelete();send(action)};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});byId('exportBackup').onclick=()=>send({type:'exportBackup'});
+byId('deleteExpense').onclick=askDelete;byId('cancelDelete').onclick=closeDelete;byId('confirmDelete').onclick=()=>{const action={type:deletingType,id:deletingType==='delete'?editing:editingSub};closeDelete();send(action)};byId('saveBudget').onclick=()=>send({type:'budget',amount:byId('budgetInput').value||'0'});byId('savePayday').onclick=()=>send({type:'payday',date:byId('paydayInput').value});byId('exportCSV').onclick=()=>send({type:'exportCSV'});byId('exportJSON').onclick=()=>send({type:'exportJSON'});byId('exportBackup').onclick=()=>send({type:'exportBackup'});
 render();if(boot.initialTab!=='overview')showTab(boot.initialTab);if(boot.startAdding){openForm(boot.attempt);if(boot.status)byId('formError').textContent=boot.status}else if(boot.subscriptionAttempt){openSubForm(boot.subscriptionAttempt);if(boot.status)byId('subError').textContent=boot.status}else if(boot.status)toast(boot.status);
 </script></body></html>`;
 }
@@ -244,9 +262,15 @@ async function handleAction(state, action) {
   }
   if (action.type === "budget") {
     const budget = amountFrom(action.amount, true);
-    saveBudget(budget);
+    saveSettings({ budget, paydayAnchor: state.paydayAnchor || DEFAULT_PAYDAY_ANCHOR });
     state.budget = budget;
     return "Monthly target saved";
+  }
+  if (action.type === "payday") {
+    const paydayAnchor = dayOf(dateFor(String(action.date || "")));
+    saveSettings({ budget: state.budget, paydayAnchor });
+    state.paydayAnchor = paydayAnchor;
+    return "Payday saved";
   }
   if (action.type === "subscriptionSave") {
     const items = state.subscriptions || [];
@@ -299,6 +323,7 @@ async function handleAction(state, action) {
   }
   if (action.type === "exportBackup") {
     const backup = { version: 1, exportedAt: new Date().toISOString(), monthlyBudget: state.budget,
+      paydayAnchor: state.paydayAnchor || DEFAULT_PAYDAY_ANCHOR,
       expenses: state.expenses, subscriptions: state.subscriptions || [] };
     await DocumentPicker.exportString(JSON.stringify(backup, null, 2), "NOVA-complete-backup.json");
     return "Complete backup exported";
@@ -306,7 +331,7 @@ async function handleAction(state, action) {
   throw new Error("Unknown action.");
 }
 
-async function showApp(state, startAdding) {
+async function showApp(state, startAdding, initialTab = "overview") {
   const web = new WebView();
   const prefix = "https://scriptable-action.invalid/submit?payload=";
   let busy = false;
@@ -323,7 +348,7 @@ async function showApp(state, startAdding) {
       try { status = await handleAction(state, action); }
       catch (error) { failed = true; status = String(error.message || error); }
       const type = String(action.type || "");
-      const tab = type === "budget" || type.startsWith("export") ? "settings" :
+      const tab = type === "budget" || type === "payday" || type.startsWith("export") ? "settings" :
         type.startsWith("subscription") ? "subscriptions" : type === "delete" ? "history" : "overview";
       try { await web.loadHTML(makeHTML(state, failed && action.type === "save", status,
         tab, failed && action.type === "save" ? action : null,
@@ -333,7 +358,7 @@ async function showApp(state, startAdding) {
     });
     return false;
   };
-  await web.loadHTML(makeHTML(state, startAdding));
+  await web.loadHTML(makeHTML(state, startAdding, "", initialTab));
   await web.present(false);
 }
 
@@ -567,6 +592,24 @@ function makeWidget(state, error, family = config.widgetFamily || "medium") {
       .slice(0, family === "extraLarge" ? 4 : 2);
     if (!recent.length) widgetText(widget, "Nothing logged yet", 11, "#CBD5E1");
     for (const entry of recent) widgetRow(widget, entry.note, money(entry.amount), "#FFFFFF", 11);
+
+    widget.addSpacer(13);
+    const payday = nextPayday(state.paydayAnchor || DEFAULT_PAYDAY_ANCHOR, now);
+    const paydayCard = widget.addStack();
+    paydayCard.layoutHorizontally();
+    paydayCard.centerAlignContent();
+    paydayCard.backgroundColor = new Color("#1B2D49");
+    paydayCard.cornerRadius = 12;
+    paydayCard.setPadding(10, 12, 10, 12);
+    paydayCard.url = baseURL + (baseURL.includes("?") ? "&" : "?") + "action=payday";
+    const paydayLabel = paydayCard.addStack();
+    paydayLabel.layoutVertically();
+    widgetText(paydayLabel, "NEXT PAYDAY", 9, "#94A3B8", "semibold");
+    paydayLabel.addSpacer(3);
+    const paydayDate = new Date(payday.date + "T12:00:00");
+    widgetText(paydayLabel, paydayDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }), 13, "#FFFFFF", "semibold");
+    paydayCard.addSpacer();
+    widgetText(paydayCard, payday.daysUntil === 0 ? "TODAY" : payday.daysUntil + " DAYS", 17, "#60A5FA", "bold");
   }
 
   widget.addSpacer();
@@ -582,7 +625,8 @@ if (config.runsInWidget) {
   try { Script.setWidget(makeWidget(await loadState(false))); }
   catch (error) { console.error(error); Script.setWidget(makeWidget(null, error)); }
 } else {
-  try { await showApp(await loadState(), args.queryParameters?.action === "add"); }
+  try { await showApp(await loadState(), args.queryParameters?.action === "add",
+    args.queryParameters?.action === "payday" ? "settings" : "overview"); }
   catch (error) {
     const alert = new Alert(); alert.title = "NOVA";
     alert.message = "Could not open iCloud data: " + String(error.message || error) +
